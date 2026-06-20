@@ -1,0 +1,8 @@
+{
+  "title": "Checkout 500 errors",
+  "message": "Users hitting 500 on /checkout since 14:30. Logs show 'connection refused' to redis. namespace=payments",
+  "severity": "high",
+  "labels": {
+    "namespace": "payments"
+  }
+}

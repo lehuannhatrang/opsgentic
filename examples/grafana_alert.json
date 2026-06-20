@@ -1,0 +1,25 @@
+{
+  "title": "[FIRING:1] HighPodMemory",
+  "status": "firing",
+  "commonLabels": {
+    "alertname": "HighPodMemory",
+    "severity": "critical",
+    "namespace": "payments"
+  },
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighPodMemory",
+        "severity": "critical",
+        "namespace": "payments",
+        "pod": "payments-api-7d9",
+        "gitops_repo": "org/gitops-apps"
+      },
+      "annotations": {
+        "summary": "Pod memory > 95%",
+        "description": "payments-api-7d9 memory usage at 97% for 10m"
+      }
+    }
+  ]
+}

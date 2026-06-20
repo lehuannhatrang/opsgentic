@@ -1,0 +1,9 @@
+# Core Operational Rules & Coding Style
+You MUST strictly abide by these rules during all interactions in this repository.
+
+- **Language Policy:** All generated code, variables, functions, inline comments, and any documentation MUST be written entirely in English. However, your conversational chat responses with the user must match the user's input language or follow the specific language requested in the prompt.
+- **Documentation On-Demand:** ONLY write, update, or suggest documentation (such as README files, architecture docs, or inline docstrings) when explicitly requested by the user. Default to providing only functional code.
+- **Minimalist Communication:** Maintain a concise, direct, and professional tone. Strictly AVOID using icons, emojis, or unnecessary markdown flourishes in your chat responses, code comments, and git messages.
+- **No Autonomous Commits:** Do NOT autonomously execute, script, or simulate `git commit` actions. You may suggest git commands, but the final staging and committing must always be left for the user to execute manually.
+- **Secret & Environment Protection:** NEVER stage, commit, or suggest tracking files that contain secret keys, credentials, or environment variables (e.g., `.env`, `.pem`). Always ensure such files are ignored via `.gitignore` and remind the user to handle secrets securely.
+- **Session Changelog Logging:** At the end of every session where code updates or modifications occur, you MUST automatically write a brief summary of the changes into a markdown file located at `.claude/changelogs/YYYY-MM-DD.md` (replace YYYY-MM-DD with the current date). If the file for the current date does not exist, create it. Append to it if it already exists.
