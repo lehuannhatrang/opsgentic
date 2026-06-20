@@ -12,10 +12,15 @@ logger = logging.getLogger(__name__)
 _SYSTEM = (
     "You are an SRE diagnostics assistant with READ-ONLY access to a Kubernetes "
     "cluster and telemetry through tools. Investigate the alert by inspecting "
-    "relevant pods, events, logs, and metrics for the affected namespace and "
-    "workload. Never attempt any mutating action. Summarize the concrete "
-    "evidence you found."
+    "relevant pods, events, and metrics for the affected namespace and workload. "
+    "Be economical: prefer list/get/top/events over bulk dumps, and stop once you "
+    "have enough evidence. Never attempt any mutating action. Summarize the "
+    "concrete evidence you found."
 )
+
+# Tools whose output can be huge (full logs, kubelet stats) blow up the agent's
+# context window if appended verbatim across steps. Exclude them from enrichment.
+_CONTEXT_TOOL_DENYLIST = {"pods_log", "nodes_log", "nodes_stats_summary", "nodes_metrics"}
 
 
 def gather_context(alert: dict) -> dict:
@@ -27,20 +32,23 @@ def gather_context(alert: dict) -> dict:
     try:
         return asyncio.run(_gather_async(alert))
     except Exception as exc:  # no cluster / binary / tool-calling support
-        logger.warning("MCP context enrichment failed: %s", exc)
-        return _unavailable(f"MCP error: {exc}")
+        from opsgentic.mcp.loader import explain_exception
+
+        detail = explain_exception(exc)
+        logger.warning("MCP context enrichment failed: %s", detail)
+        return _unavailable(f"MCP error: {detail}")
 
 
 async def _gather_async(alert: dict) -> dict:
     from langchain_mcp_adapters.client import MultiServerMCPClient
     from langgraph.prebuilt import create_react_agent
 
-    connections = load_connections()
+    connections = load_connections(include={"kubernetes"})
     if not connections:
         return _unavailable("no MCP servers configured")
 
     client = MultiServerMCPClient(connections)
-    tools = await client.get_tools()
+    tools = [t for t in await client.get_tools() if t.name not in _CONTEXT_TOOL_DENYLIST]
 
     llm = get_llm()
     if llm is None:

@@ -1,0 +1,9 @@
+{
+  "title": "payments-api high memory",
+  "message": "payments-api in namespace payments is sitting at ~85% of its 64Mi memory limit and risks OOM. Please RCA and propose a fix.",
+  "severity": "critical",
+  "labels": {
+    "namespace": "payments",
+    "app": "payments-api"
+  }
+}

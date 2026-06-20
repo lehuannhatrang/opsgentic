@@ -11,7 +11,9 @@ from opsgentic.graph.state import MachineState
 
 def _route_after_validation(state: MachineState) -> str:
     report = state.get("validation_report") or {}
-    if report.get("passed") and state.get("execution_status") == "awaiting_approval":
+    # Route on plan presence (not transient status) so update_state on approve/reject
+    # does not re-route this edge and loop back to RCA.
+    if report.get("passed") and state.get("remediation_plan"):
         return "action"
     if state.get("execution_status") == "failed":   # retries exhausted or unresolved repo
         return "escalate"

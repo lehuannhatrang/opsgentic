@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: opsgentic
+  name: github-mcp
   namespace: opsgentic
 spec:
   selector:
-    app: opsgentic
+    app: github-mcp
   ports:
     - name: http
-      port: 80
-      targetPort: 8080
-      nodePort: 31080
+      port: 8082
+      targetPort: 8082
+      nodePort: 31082
   type: NodePort

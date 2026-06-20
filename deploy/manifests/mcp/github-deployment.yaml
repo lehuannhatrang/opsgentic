@@ -1,0 +1,48 @@
+# Read-only GitHub MCP server (github/github-mcp-server) — lets the remediation agent
+# read repo files/structure via MCP. Write to the repo still happens only in opsgentic
+# (GitHub App), never here.
+#
+# NOTE: the exact serving command/flags depend on the github-mcp-server version. Some
+# builds are stdio-only and need a stdio->HTTP gateway (e.g. supergateway) to expose
+# Streamable HTTP. Adjust `image`/`args` to your version, then confirm the URL/tools
+# with: python -m opsgentic.mcp.diagnose
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-mcp
+  namespace: opsgentic
+  labels:
+    app: github-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-mcp
+  template:
+    metadata:
+      labels:
+        app: github-mcp
+    spec:
+      containers:
+        - name: github-mcp-server
+          image: ghcr.io/github/github-mcp-server:latest
+          args: ["http", "--read-only"]   # serves Streamable HTTP on :8082 (v1.4.0)
+          env:
+            # In HTTP mode the token is supplied by the CLIENT via the Authorization
+            # header (see mcp-config/servers.yaml), so a server-side token is optional.
+            - name: GITHUB_TOOLSETS
+              value: "repos"            # read-only repo toolset is all the agent needs
+          ports:
+            - name: http
+              containerPort: 8082
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"

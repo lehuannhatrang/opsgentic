@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Optional
 
+from opsgentic.gitops import cluster
 from opsgentic.gitops.giturl import parse_repo_url
 from opsgentic.gitops.providers import get_provider
 
@@ -28,9 +29,9 @@ def derive_service_ref(alert: dict) -> dict:
 def _strip_pod_suffix(pod: str) -> str:
     parts = pod.split("-")
     if len(parts) >= 3 and re.fullmatch(r"[a-z0-9]{6,10}", parts[-2]) and re.fullmatch(r"[a-z0-9]{5}", parts[-1]):
-        return "-".join(parts[:-2])      # Deployment -> ReplicaSet -> Pod
+        return "-".join(parts[:-2])
     if len(parts) >= 2 and parts[-1].isdigit():
-        return "-".join(parts[:-1])      # StatefulSet ordinal
+        return "-".join(parts[:-1])
     if len(parts) >= 2:
         return "-".join(parts[:-1])
     return pod
@@ -39,8 +40,9 @@ def _strip_pod_suffix(pod: str) -> str:
 def resolve_target(alert: dict) -> Optional[dict]:
     """Resolve (repo, path, provider) for the alerting workload.
 
-    Chain: explicit labels -> ArgoCD -> Flux. Returns None when unresolved
-    (the graph then escalates instead of guessing a repo).
+    Chain: explicit labels -> ArgoCD -> Flux. Cluster state is read only through the
+    MCP server (no direct k8s client). Returns None when unresolved (the graph then
+    escalates instead of guessing a repo).
     """
     labels = alert.get("labels", {}) or {}
     if labels.get("gitops_repo"):
@@ -49,28 +51,11 @@ def resolve_target(alert: dict) -> Optional[dict]:
     svc = derive_service_ref(alert)
     if not svc.get("name"):
         return None
-    k = _k8s()
-    if k is None:
-        return None
 
-    candidates = _argocd_candidates(k, svc) + _flux_candidates(k, svc)
+    candidates = _argocd_candidates(svc) + _flux_candidates(svc)
     if not candidates:
         return None
     return _choose(candidates, alert)
-
-
-def _k8s():
-    try:
-        from kubernetes import client, config
-
-        try:
-            config.load_incluster_config()
-        except Exception:
-            config.load_kube_config()
-        return client
-    except Exception as exc:
-        logger.warning("kubernetes client unavailable: %s", exc)
-        return None
 
 
 def _make_target(repo_url: str, host: str, slug: str, path: str, revision: str, source: str) -> dict:
@@ -89,29 +74,35 @@ def _make_target(repo_url: str, host: str, slug: str, path: str, revision: str, 
     }
 
 
-def _from_labels(labels: dict) -> dict:
-    repo = labels["gitops_repo"]
+def _from_labels(labels: dict) -> Optional[dict]:
+    repo = (labels["gitops_repo"] or "").strip()
+    path = labels.get("gitops_path", "")
+    revision = labels.get("gitops_revision", "")
+
     if "://" in repo or repo.startswith("git@"):
         ref = parse_repo_url(repo)
         if not ref:
-            return None  # type: ignore[return-value]
-        host, slug, url = ref.host, ref.slug, repo
+            return None
+        return _make_target(repo, ref.host, ref.slug, path, revision, "labels")
+
+    segs = [s for s in repo.split("/") if s]
+    first = segs[0] if segs else ""
+    if "." in first or ":" in first:
+        host, slug = first.lower(), "/".join(segs[1:])
     else:
-        host = (labels.get("gitops_host") or "github.com").lower()
-        slug = repo
-        url = f"https://{host}/{slug}.git"
-    return _make_target(url, host, slug, labels.get("gitops_path", ""), labels.get("gitops_revision", ""), "labels")
+        host, slug = (labels.get("gitops_host") or "github.com").lower(), "/".join(segs)
+    if len([s for s in slug.split("/") if s]) < 2:
+        return None
+    return _make_target(f"https://{host}/{slug}.git", host, slug, path, revision, "labels")
 
 
-def _argocd_candidates(k, svc: dict) -> list:
+def _argocd_candidates(svc: dict) -> list:
     out: list = []
-    try:
-        api = k.CustomObjectsApi()
-        items = api.list_cluster_custom_object("argoproj.io", "v1alpha1", "applications").get("items", [])
-    except Exception as exc:
-        logger.info("ArgoCD lookup skipped: %s", exc)
-        return out
-    for app in items:
+    # list -> (ns, name) refs from the table, then fetch each full Application object.
+    for app_ref in cluster.list_resource_refs("argoproj.io/v1alpha1", "Application"):
+        app = cluster.get_resource("argoproj.io/v1alpha1", "Application", app_ref["name"], app_ref.get("namespace"))
+        if not isinstance(app, dict):
+            continue
         spec = app.get("spec", {}) or {}
         source = spec.get("source") or (spec.get("sources") or [{}])[0]
         repo_url = source.get("repoURL")
@@ -125,7 +116,7 @@ def _argocd_candidates(k, svc: dict) -> list:
             continue
         t = _make_target(repo_url, ref.host, ref.slug, source.get("path", ""), source.get("targetRevision", ""), "argocd")
         t["_score"] = score
-        t["_app"] = (app.get("metadata", {}) or {}).get("name")
+        t["_app"] = (app.get("metadata", {}) or {}).get("name") or app_ref["name"]
         out.append(t)
     return out
 
@@ -142,37 +133,34 @@ def _argocd_score(app: dict, svc: dict) -> int:
     return 1 if dest.get("namespace") == svc["namespace"] else 0
 
 
-def _flux_candidates(k, svc: dict) -> list:
-    out: list = []
-    try:
-        labels = (k.AppsV1Api().read_namespaced_deployment(svc["name"], svc["namespace"]).metadata.labels) or {}
-    except Exception as exc:
-        logger.info("Flux workload lookup skipped: %s", exc)
-        return out
+def _flux_candidates(svc: dict) -> list:
+    dep = cluster.get_resource("apps/v1", "Deployment", svc["name"], svc["namespace"])
+    if not dep:
+        return []
+    labels = ((dep.get("metadata", {}) or {}).get("labels") or {})
     ks_name = labels.get("kustomize.toolkit.fluxcd.io/name")
     ks_ns = labels.get("kustomize.toolkit.fluxcd.io/namespace")
     if not (ks_name and ks_ns):
-        return out
-    try:
-        api = k.CustomObjectsApi()
-        ks = api.get_namespaced_custom_object("kustomize.toolkit.fluxcd.io", "v1", ks_ns, "kustomizations", ks_name)
-        src = (ks.get("spec", {}) or {}).get("sourceRef", {}) or {}
-        if src.get("kind") != "GitRepository":
-            return out
-        gr = api.get_namespaced_custom_object(
-            "source.toolkit.fluxcd.io", "v1", src.get("namespace", ks_ns), "gitrepositories", src["name"]
-        )
-        url = (gr.get("spec", {}) or {}).get("url")
-        rev = ((gr.get("spec", {}) or {}).get("ref", {}) or {}).get("branch", "")
-        ref = parse_repo_url(url)
-        if not ref:
-            return out
-        t = _make_target(url, ref.host, ref.slug, (ks.get("spec", {}) or {}).get("path", ""), rev, "flux")
-        t["_score"] = 3
-        out.append(t)
-    except Exception as exc:
-        logger.info("Flux Kustomization resolve failed: %s", exc)
-    return out
+        return []
+
+    ks = cluster.get_resource("kustomize.toolkit.fluxcd.io/v1", "Kustomization", ks_name, ks_ns)
+    if not ks:
+        return []
+    src = (ks.get("spec", {}) or {}).get("sourceRef", {}) or {}
+    if src.get("kind") != "GitRepository":
+        return []
+
+    gr = cluster.get_resource("source.toolkit.fluxcd.io/v1", "GitRepository", src["name"], src.get("namespace", ks_ns))
+    if not gr:
+        return []
+    url = (gr.get("spec", {}) or {}).get("url")
+    rev = ((gr.get("spec", {}) or {}).get("ref", {}) or {}).get("branch", "")
+    ref = parse_repo_url(url)
+    if not ref:
+        return []
+    t = _make_target(url, ref.host, ref.slug, (ks.get("spec", {}) or {}).get("path", ""), rev, "flux")
+    t["_score"] = 3
+    return [t]
 
 
 def _choose(candidates: list, alert: dict) -> dict:
@@ -181,8 +169,7 @@ def _choose(candidates: list, alert: dict) -> dict:
     tied = [c for c in candidates if c.get("_score", 0) == top_score]
     if len(tied) == 1:
         return _clean(tied[0])
-    chosen = _llm_pick(tied, alert) or tied[0]   # hybrid: LLM tiebreak, else best-ranked
-    return _clean(chosen)
+    return _clean(_llm_pick(tied, alert) or tied[0])
 
 
 def _llm_pick(tied: list, alert: dict) -> Optional[dict]:

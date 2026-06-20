@@ -1,19 +1,23 @@
-# MCP servers wired into the agents (read-only). Loaded by src/opsgentic/mcp/loader.py
-# into a langchain-mcp-adapters MultiServerMCPClient.
-#
-# In-cluster, kubernetes-mcp-server runs as a stdio subprocess and uses the pod's
-# ServiceAccount (in-cluster config); the read-only ClusterRole is the real guard.
+# MCP servers — the single gateway for all read-only tools. Loaded by
+# src/opsgentic/mcp/loader.py into a langchain-mcp-adapters MultiServerMCPClient.
+# Values support ${ENV} expansion. Cluster reads use only the "kubernetes" server;
+# the remediation agent uses both "kubernetes" and "github".
 servers:
   kubernetes:
-    transport: stdio
-    command: npx
-    args:
-      - "-y"
-      - "kubernetes-mcp-server@latest"
-      - "--read-only"
-      - "--disable-destructive"
+    transport: streamable_http
+    url: ${K8S_MCP_URL}            # e.g. http://kubernetes-mcp.opsgentic.svc:8080/mcp
 
-  # Telemetry example (uncomment + run as a sidecar/service). Values support ${ENV}.
-  # prometheus:
-  #   transport: streamable_http
-  #   url: ${PROMETHEUS_MCP_URL}
+  # Read-only GitHub MCP server (github/github-mcp-server) so the remediation agent
+  # can read repo files/structure. Until deployed, the agent path falls back to the
+  # deterministic patcher. Verify with: python -m opsgentic.mcp.diagnose
+  github:
+    transport: streamable_http
+    url: ${GITHUB_MCP_URL}         # e.g. http://github-mcp.opsgentic.svc:8082/mcp
+    headers:                       # github-mcp-server HTTP mode authenticates per-request
+      Authorization: "Bearer ${GITHUB_MCP_TOKEN}"
+
+  # Local dev against a kubeconfig (no deployed server) — run via stdio instead:
+  # kubernetes:
+  #   transport: stdio
+  #   command: npx
+  #   args: ["-y", "kubernetes-mcp-server@latest", "--read-only", "--disable-destructive"]

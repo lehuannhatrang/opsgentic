@@ -1,10 +1,12 @@
+# The read-only ClusterRole is granted to the MCP server's ServiceAccount — it is the
+# only component that touches the Kubernetes API. opsgentic itself needs no cluster RBAC.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: opsgentic-readonly
 subjects:
   - kind: ServiceAccount
-    name: opsgentic
+    name: kubernetes-mcp
     namespace: opsgentic
 roleRef:
   kind: ClusterRole

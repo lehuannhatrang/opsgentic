@@ -7,6 +7,11 @@ resources:
   - rbac/serviceaccount.yaml
   - rbac/clusterrole-readonly.yaml
   - rbac/clusterrolebinding.yaml
+  - mcp/serviceaccount.yaml
+  - mcp/deployment.yaml
+  - mcp/service.yaml
+  - mcp/github-deployment.yaml
+  - mcp/github-service.yaml
   - configmap.yaml
   - deployment.yaml
   - service.yaml

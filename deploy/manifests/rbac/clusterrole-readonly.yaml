@@ -31,6 +31,10 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]
+  # Node stats/log tools (kubelet reached via the API-server proxy).
+  - apiGroups: [""]
+    resources: ["nodes/proxy", "nodes/stats", "nodes/metrics", "nodes/log"]
+    verbs: ["get"]
   # GitOps controllers — read-only, for alert -> repo discovery.
   - apiGroups: ["argoproj.io"]
     resources: ["applications", "applicationsets", "appprojects"]

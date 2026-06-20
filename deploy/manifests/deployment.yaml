@@ -18,7 +18,7 @@ spec:
       serviceAccountName: opsgentic
       containers:
         - name: opsgentic
-          image: opsgentic:dev
+          image: docker.io/lehuannhatrang/opsgentic:dev-0.1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

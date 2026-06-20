@@ -29,7 +29,7 @@ The Action Agent never opens a PR autonomously: the graph pauses at an `interrup
 
 1. **Core Orchestrator & Agents** (`src/opsgentic/graph`) — LangGraph `StateGraph` managing a typed `MachineState` (`alert_payload`, `context_data`, `hypothesis`, `remediation_plan`, `validation_report`, `execution_status`).
 2. **Skills** (`src/opsgentic/skills`) — deterministic validation/business logic modules, decoupled from MCP.
-3. **MCP Servers & Tooling** (`mcp-config/`, `src/opsgentic/mcp`) — configuration for existing open-source MCP servers in read-only mode, wired into the RCA agent for context enrichment.
+3. **MCP Servers & Tooling** (`mcp-config/`, `deploy/manifests/mcp/`, `src/opsgentic/mcp`) — the single gateway for all read tools: a deployed read-only `kubernetes-mcp-server` (cluster) and `github-mcp-server` (repo). RCA context, alert→repo resolution, and the remediation agent's repo/cluster reads all go through MCP; opsgentic uses no direct Kubernetes client and no kubectl. Writes (commits/PRs) happen only in opsgentic via the GitHub App.
 4. **Deployment Manifests** (`deploy/manifests/`) — Kubernetes manifests: namespace, read-only RBAC (ClusterRole/ServiceAccount), ConfigMap/Secret, Deployment + Service, Job template.
 
 ## Machine state & graph flow
@@ -53,6 +53,8 @@ Both triggers normalize to the same `alert_payload`:
 - **Grafana / Alertmanager webhook** — `POST /webhook/grafana`
 - **User chat** (operator provides error context) — `POST /chat`
 
+With `AUTO_APPROVE=true`, a passing validation opens the PR automatically (PR review/merge becomes the human gate); otherwise the run pauses at `awaiting_approval` for `/runs/{id}/approve` or `/ui/{id}`.
+
 ## Multi-repo resolution
 
 opsgentic maps an alert to the GitOps repo/path that owns the affected workload, so one deployment serves many repos. Resolution chain (first match wins):
@@ -62,9 +64,9 @@ opsgentic maps an alert to the GitOps repo/path that owns the affected workload,
 3. **Flux** — the workload's `kustomize.toolkit.fluxcd.io/{name,namespace}` labels → `Kustomization` → `GitRepository` URL + path.
 4. Unresolved → escalate (opsgentic does not guess a repo).
 
-Discovery is deterministic — CRDs are read read-only via the Kubernetes API under the pod's ServiceAccount; when more than one source matches with equal confidence, the LLM picks among the candidates (hybrid).
+Discovery is deterministic — CRDs are read read-only through the **kubernetes-mcp-server** (MCP); when more than one source matches with equal confidence, the LLM picks among the candidates (hybrid).
 
-The resolved host selects a provider from the registry (`config/gitops.yaml`): each git host maps to a type (`github` / `gitea` / `gitlab`), an API base, and the env var holding that provider's token. Use a dedicated bot/service account per provider, least-privilege over the GitOps repos.
+The resolved host selects a provider from the registry (`config/gitops.yaml`): each git host maps to a type (`github` / `gitea` / `gitlab`), an API base, and the env var holding that provider's token. Use a dedicated bot/service account per provider, least-privilege over the GitOps repos. For GitHub, prefer a **GitHub App** (set `GITHUB_APP_ID` + `GITHUB_APP_INSTALLATION_ID` + private key): opsgentic mints short-lived installation tokens; a PAT (`GITHUB_TOKEN`) is the fallback. The App needs `Contents: Read & write` and `Pull requests: Read & write`.
 
 ## Project layout
 
@@ -139,13 +141,17 @@ A trigger returns a `thread_id` and `awaiting_approval`; the operator then calls
 | `LLM_TEMPERATURE`  | `0.0`         | Sampling temperature.                                      |
 | `LLM_MAX_TOKENS`   | `4096`        | Max output tokens.                                         |
 | `GIT_CONFIG_PATH`  | `config/gitops.yaml` | Provider registry (host -> type/api_base/token_env). |
-| `GITHUB_TOKEN`     | _(empty)_     | GitHub bot token (per the registry's `token_env`).         |
+| `GITHUB_APP_ID`    | _(empty)_     | GitHub App id (preferred GitHub auth — mints installation tokens). |
+| `GITHUB_APP_INSTALLATION_ID` | _(empty)_ | GitHub App installation id.                          |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | _(empty)_ | Path to the App private key `.pem` (or inline `GITHUB_APP_PRIVATE_KEY`). |
+| `GITHUB_TOKEN`     | _(empty)_     | Fallback GitHub PAT (used only if the App is not configured). |
 | `GITEA_TOKEN`      | _(empty)_     | Gitea bot token.                                           |
 | `GITLAB_TOKEN`     | _(empty)_     | GitLab bot token.                                          |
 | `GIT_PROVIDER`     | `github`      | Legacy fallback type for hosts not in the registry.       |
 | `GIT_TOKEN`        | _(empty)_     | Legacy fallback token for hosts not in the registry.      |
 | `GIT_BASE_URL`     | _(empty)_     | Legacy fallback API base.                                  |
 | `MAX_RCA_ATTEMPTS` | `2`           | Self-heal loop cap before escalation.                      |
+| `AUTO_APPROVE`     | `false`       | `true` opens the PR automatically (no human approve step). |
 | `MCP_ENABLED`      | `false`       | Enable read-only MCP context enrichment in the RCA agent.  |
 | `MCP_CONFIG_PATH`  | `mcp-config/servers.yaml` | Path to the MCP servers config file.           |
 | `DATABASE_URL`     | _(empty)_     | Postgres DSN for durable checkpoints. Empty -> in-memory.  |
@@ -164,24 +170,29 @@ docker run --rm -p 8080:8080 --env-file .env opsgentic:dev
 ## Deploy to Kubernetes
 
 ```bash
-kubectl apply -k deploy/manifests/        # namespace, read-only RBAC, ConfigMap, Deployment, Service
+kubectl apply -k deploy/manifests/        # namespace, read-only RBAC, kubernetes-mcp-server, ConfigMap, Deployment, Service
 kubectl -n opsgentic create secret generic opsgentic-secrets \
   --from-literal=LLM_BASE_URL=http://vllm.vllm.svc:8000/v1 \
   --from-literal=LLM_API_KEY=... \
   --from-literal=GIT_TOKEN=...
 ```
 
-The pod runs under the `opsgentic` ServiceAccount bound to a read-only ClusterRole (no `secrets`, no write verbs). `kubernetes-mcp-server` runs as a stdio subprocess using the pod's in-cluster credentials, so the tooling layer is read-only by RBAC regardless of agent behavior. Real values come from a Secret managed out of band (Sealed/External Secrets); `secret.example.yaml` is a template only.
+The read-only ClusterRole is bound to the `kubernetes-mcp` ServiceAccount; the `kubernetes-mcp-server` Deployment is the **only** component with cluster API access (read-only by RBAC + `--read-only`), and opsgentic reaches the cluster solely through it. opsgentic's own ServiceAccount needs no cluster RBAC. Real values come from a Secret managed out of band (Sealed/External Secrets); `secret.example.yaml` is a template only. Adjust the `kubernetes-mcp-server` image/tag and `K8S_MCP_URL` to your environment.
 
 ## Status & roadmap
 
 - **M1 (done)** — runnable skeleton: LangGraph orchestrator, three agent nodes, Validation Skills, both triggers, `interrupt_before` approval gate, FastAPI + CLI.
 - **M2 (done)** — read-only MCP (`kubernetes-mcp-server`) wired into RCA for real `context_data`; read-only RBAC (ClusterRole/ServiceAccount) and `deploy/manifests/` (Deployment, Service, Job template).
-- **M3 (done)** — durable checkpointing (`PostgresSaver`, falls back to in-memory when `DATABASE_URL` is unset); real PR creation (remediation-proposal PR); minimal HTML approval page at `/ui/{thread_id}`.
+- **M3 (done)** — durable checkpointing (`PostgresSaver`, falls back to in-memory when `DATABASE_URL` is unset); real PR creation; minimal HTML approval page at `/ui/{thread_id}`.
 - **Multi-repo (done)** — alert→repo discovery via ArgoCD + Flux CRDs (deterministic, LLM tiebreak when ambiguous); multi-provider PR/MR (GitHub, Gitea, GitLab) via a host→provider registry with per-provider bot tokens.
+- **Auto-remediation (done)** — the Action agent fetches the resolved manifest, generates an LLM patch (validated YAML) and commits the edited manifest in the PR; proposal-markdown fallback when the manifest can't be fetched or the patch is invalid. GitHub authenticates as a GitHub App (PAT fallback).
+- **PR dedup (done)** — a stable issue key drives a deterministic branch; a re-fired alert updates the existing open PR instead of opening a duplicate.
+- **MCP gateway (done)** — all cluster access (RCA context + repo resolution) routes through a deployed read-only `kubernetes-mcp-server`; no direct k8s client/kubectl. Read-only ClusterRole bound to the MCP server's ServiceAccount.
+- **Agentic remediation (done)** — the Action step runs a read-only agent that reads the repo via a self-hosted `github-mcp-server` (and the cluster via `kubernetes-mcp-server`), locates the responsible manifest(s) (plain / Kustomize / Helm) and proposes multi-file edits; opsgentic commits them (agent read-only; writes via the GitHub App). Falls back to the deterministic patcher when the repo MCP server isn't reachable.
 - **M4** — automatic triggering from Grafana/Alertmanager; deeper validation skills; observability/tracing.
 
 ## Notes
 
 - Checkpointing: set `DATABASE_URL` to use the durable `PostgresSaver` (state survives restarts and lets the Deployment scale out). Without it, an in-memory checkpointer is used — single process, state lost on restart, fine for dev.
-- Agents have read-only access to the cluster (including ArgoCD/Flux CRDs, used to map an alert to its repo). All changes flow through GitOps pull requests, gated by human approval. opsgentic only **opens** the PR; a GitOps controller (ArgoCD/Flux) applies the change after merge. A controller is optional — without one, set `gitops_repo`/`gitops_path` labels on alerts (the resolver's fallback), then merge the PR and apply via CI or `kubectl` yourself.
+- All cluster access goes through the read-only `kubernetes-mcp-server` (MCP) — no direct Kubernetes client, no kubectl. The read-only ClusterRole is bound to the MCP server's ServiceAccount. All changes flow through GitOps pull requests, gated by human approval (or by PR review when `AUTO_APPROVE=true`). opsgentic only **opens** the PR; a GitOps controller (ArgoCD/Flux) applies the change after merge. A controller is optional — without one, set `gitops_repo`/`gitops_path` labels on alerts (the resolver's fallback), then merge the PR and apply via CI or `kubectl` yourself.
+- Repeated alerts don't duplicate PRs: a stable issue key (repo + file + alertname + namespace) drives a deterministic branch, so a re-fired alert updates the existing open PR (file + description) instead of opening a new one.

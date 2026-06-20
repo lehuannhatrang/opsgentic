@@ -45,10 +45,15 @@ def _config(thread_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}
 
 
-def start_run(alert_payload: dict, thread_id: str | None = None) -> dict:
+def start_run(alert_payload: dict, thread_id: str | None = None, auto_approve: bool | None = None) -> dict:
+    if auto_approve is None:
+        auto_approve = get_settings().auto_approve
     thread_id = thread_id or str(uuid.uuid4())
+    cfg = _config(thread_id)
     initial = {"alert_payload": alert_payload, "execution_status": "pending"}
-    _app.invoke(initial, _config(thread_id))   # stops before 'action' (interrupt_before)
+    _app.invoke(initial, cfg)                   # stops before 'action' (interrupt_before)
+    if auto_approve and "action" in _app.get_state(cfg).next:
+        _app.invoke(None, cfg)                  # auto-resume -> action opens the PR
     return snapshot(thread_id)
 
 
@@ -61,7 +66,8 @@ def approve(thread_id: str) -> dict:
 
 def reject(thread_id: str) -> dict:
     cfg = _config(thread_id)
-    _app.update_state(cfg, {"execution_status": "rejected"})
+    # Attribute to 'action' so the graph ends (action -> END) without running it.
+    _app.update_state(cfg, {"execution_status": "rejected"}, as_node="action")
     return snapshot(thread_id)
 
 
