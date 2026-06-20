@@ -1,13 +1,43 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
 
+from opsgentic.config import get_settings
 from opsgentic.graph.builder import build_app
 
-# M1: in-memory checkpointer (single process). M3 switches to PostgresSaver (durable).
-_checkpointer = MemorySaver()
+logger = logging.getLogger(__name__)
+
+
+def _build_checkpointer():
+    """Durable PostgresSaver when DATABASE_URL is set; otherwise in-memory."""
+    settings = get_settings()
+    if not settings.database_url:
+        return MemorySaver()
+    try:
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+
+        pool = ConnectionPool(
+            conninfo=settings.database_url,
+            max_size=settings.db_pool_max_size,
+            open=False,
+            kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+        )
+        pool.open()
+        saver = PostgresSaver(pool)
+        saver.setup()
+        logger.info("Using PostgresSaver for durable checkpoints")
+        return saver
+    except Exception as exc:  # missing driver / unreachable DB -> safe dev fallback
+        logger.warning("PostgresSaver unavailable (%s); falling back to MemorySaver", exc)
+        return MemorySaver()
+
+
+_checkpointer = _build_checkpointer()
 _app = build_app(_checkpointer)
 
 

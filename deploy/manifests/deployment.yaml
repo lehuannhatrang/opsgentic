@@ -1,0 +1,52 @@
+# Long-running webhook receiver. Single replica: the M1/M2 checkpointer is
+# in-memory (M3 moves to PostgresSaver, after which this can scale out).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opsgentic
+  namespace: opsgentic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opsgentic
+  template:
+    metadata:
+      labels:
+        app: opsgentic
+    spec:
+      serviceAccountName: opsgentic
+      containers:
+        - name: opsgentic
+          image: opsgentic:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: opsgentic-config
+            - secretRef:
+                name: opsgentic-secrets
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"

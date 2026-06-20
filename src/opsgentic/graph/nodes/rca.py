@@ -4,6 +4,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from opsgentic.agents.llm import get_llm
 from opsgentic.graph.state import MachineState
+from opsgentic.mcp.context import gather_context
 
 _SYSTEM = (
     "You are an SRE Root Cause Analysis agent. Given an alert payload and "
@@ -14,8 +15,8 @@ _SYSTEM = (
 
 def rca_node(state: MachineState) -> dict:
     alert = state.get("alert_payload", {})
-    # M1: stubbed context. M2 replaces it with read-only MCP queries (k8s/telemetry).
-    context = state.get("context_data") or {"note": "context enrichment pending (M2/MCP)"}
+    # Reuse caller-supplied context if present; otherwise enrich via read-only MCP.
+    context = state.get("context_data") or gather_context(alert)
     attempts = state.get("rca_attempts", 0) + 1
 
     llm = get_llm()

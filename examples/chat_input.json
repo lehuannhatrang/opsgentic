@@ -1,8 +1,11 @@
 {
-  "title": "Checkout 500 errors",
-  "message": "Users hitting 500 on /checkout since 14:30. Logs show 'connection refused' to redis. namespace=payments",
-  "severity": "high",
+  "title": "payments-api high memory",
+  "message": "payments-api in namespace payments is sitting at ~85% of its 64Mi memory limit and risks OOM. Please RCA and propose a fix.",
+  "severity": "critical",
   "labels": {
-    "namespace": "payments"
+    "namespace": "payments",
+    "app": "payments-api",
+    "gitops_repo": "lehuannhatrang/demo-workload",
+    "gitops_path": "apps/payments-api/deployment.yaml"
   }
 }

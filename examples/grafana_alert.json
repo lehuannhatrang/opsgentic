@@ -14,11 +14,13 @@
         "severity": "critical",
         "namespace": "payments",
         "pod": "payments-api-7d9",
-        "gitops_repo": "org/gitops-apps"
+        "app": "payments-api",
+        "gitops_repo": "lehuannhatrang/demo-workload",
+        "gitops_path": "apps/payments-api/deployment.yaml"
       },
       "annotations": {
-        "summary": "Pod memory > 95%",
-        "description": "payments-api-7d9 memory usage at 97% for 10m"
+        "summary": "Pod memory above 75% of limit",
+        "description": "payments-api memory working set ~85% of its 64Mi limit for 5m"
       }
     }
   ]

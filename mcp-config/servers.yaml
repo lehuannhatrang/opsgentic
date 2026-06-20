@@ -1,0 +1,19 @@
+# MCP servers wired into the agents (read-only). Loaded by src/opsgentic/mcp/loader.py
+# into a langchain-mcp-adapters MultiServerMCPClient.
+#
+# In-cluster, kubernetes-mcp-server runs as a stdio subprocess and uses the pod's
+# ServiceAccount (in-cluster config); the read-only ClusterRole is the real guard.
+servers:
+  kubernetes:
+    transport: stdio
+    command: npx
+    args:
+      - "-y"
+      - "kubernetes-mcp-server@latest"
+      - "--read-only"
+      - "--disable-destructive"
+
+  # Telemetry example (uncomment + run as a sidecar/service). Values support ${ENV}.
+  # prometheus:
+  #   transport: streamable_http
+  #   url: ${PROMETHEUS_MCP_URL}

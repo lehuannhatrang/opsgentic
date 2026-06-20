@@ -4,15 +4,16 @@ from langgraph.graph import END, START, StateGraph
 
 from opsgentic.graph.nodes.action import action_node
 from opsgentic.graph.nodes.rca import rca_node
+from opsgentic.graph.nodes.resolve import resolve_target_node
 from opsgentic.graph.nodes.validation import validation_node
 from opsgentic.graph.state import MachineState
 
 
 def _route_after_validation(state: MachineState) -> str:
     report = state.get("validation_report") or {}
-    if report.get("passed"):
+    if report.get("passed") and state.get("execution_status") == "awaiting_approval":
         return "action"
-    if state.get("execution_status") == "failed":   # retries exhausted
+    if state.get("execution_status") == "failed":   # retries exhausted or unresolved repo
         return "escalate"
     return "rca"                                     # self-heal loop
 
@@ -20,11 +21,13 @@ def _route_after_validation(state: MachineState) -> str:
 def build_app(checkpointer):
     g = StateGraph(MachineState)
     g.add_node("rca", rca_node)
+    g.add_node("resolve_target", resolve_target_node)
     g.add_node("validation", validation_node)
     g.add_node("action", action_node)
 
     g.add_edge(START, "rca")
-    g.add_edge("rca", "validation")
+    g.add_edge("rca", "resolve_target")
+    g.add_edge("resolve_target", "validation")
     g.add_conditional_edges(
         "validation",
         _route_after_validation,

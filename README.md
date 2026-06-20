@@ -1,5 +1,5 @@
 <p align="center" style="width: fit-content; margin: 0 auto; background: white;">
-  <img src="docs/figures/opsgentic-logo.png" alt="logo" width="120"/>
+  <img src="docs/figures/opsgentic-logo.png" alt="logo" width="200"/>
 </p>
 
 # OpsGentic
@@ -29,21 +29,22 @@ The Action Agent never opens a PR autonomously: the graph pauses at an `interrup
 
 1. **Core Orchestrator & Agents** (`src/opsgentic/graph`) — LangGraph `StateGraph` managing a typed `MachineState` (`alert_payload`, `context_data`, `hypothesis`, `remediation_plan`, `validation_report`, `execution_status`).
 2. **Skills** (`src/opsgentic/skills`) — deterministic validation/business logic modules, decoupled from MCP.
-3. **MCP Servers & Tooling** (`mcp-config/`) — configuration and packaging for existing open-source MCP servers in read-only mode. (Wiring lands in M2.)
-4. **Deployment Manifests** (`deploy/manifests/`) — Kubernetes YAML / Helm, strict RBAC, and event triggers. (Lands in M2.)
+3. **MCP Servers & Tooling** (`mcp-config/`, `src/opsgentic/mcp`) — configuration for existing open-source MCP servers in read-only mode, wired into the RCA agent for context enrichment.
+4. **Deployment Manifests** (`deploy/manifests/`) — Kubernetes manifests: namespace, read-only RBAC (ClusterRole/ServiceAccount), ConfigMap/Secret, Deployment + Service, Job template.
 
 ## Machine state & graph flow
 
 ```
-trigger -> RCA -> Validation -> [interrupt_before] -> Action -> END
-                      |                                  ^
-                      +-- (fail, capped retries) --------+ (self-heal loop)
+trigger -> RCA -> resolve_target -> Validation -> [interrupt_before] -> Action -> END
+                                       |                                  ^
+                                       +-- (fail / unresolved repo) ------+ (self-heal loop)
 ```
 
 1. **RCA** reads `alert_payload`, gathers `context_data`, writes `hypothesis`.
-2. **Validation** runs the Validation Skills. On pass it drafts a `remediation_plan` and sets `execution_status="awaiting_approval"`. On fail it loops back to RCA, up to `MAX_RCA_ATTEMPTS`, then escalates.
-3. The graph **pauses before `action`** (`interrupt_before=["action"]`); state is persisted by the checkpointer keyed on `thread_id`. No PR exists yet.
-4. A human approves; the run resumes and the **Action Agent** opens the remediation PR.
+2. **resolve_target** maps the alerting workload to its GitOps repo/path (see Multi-repo resolution).
+3. **Validation** runs the Validation Skills. On pass (and a resolved repo) it drafts a `remediation_plan` and sets `execution_status="awaiting_approval"`. On fail or unresolved repo it loops back to RCA up to `MAX_RCA_ATTEMPTS`, then escalates.
+4. The graph **pauses before `action`** (`interrupt_before=["action"]`); state is persisted by the checkpointer keyed on `thread_id`. No PR exists yet.
+5. A human approves; the run resumes and the **Action Agent** opens the remediation PR.
 
 ## Triggers
 
@@ -51,6 +52,19 @@ Both triggers normalize to the same `alert_payload`:
 
 - **Grafana / Alertmanager webhook** — `POST /webhook/grafana`
 - **User chat** (operator provides error context) — `POST /chat`
+
+## Multi-repo resolution
+
+opsgentic maps an alert to the GitOps repo/path that owns the affected workload, so one deployment serves many repos. Resolution chain (first match wins):
+
+1. Explicit alert labels `gitops_repo` / `gitops_path` (override / fast path).
+2. **ArgoCD** — the `Application` whose `status.resources` (or destination namespace) contains the workload → `spec.source.repoURL` + `path` + `targetRevision`.
+3. **Flux** — the workload's `kustomize.toolkit.fluxcd.io/{name,namespace}` labels → `Kustomization` → `GitRepository` URL + path.
+4. Unresolved → escalate (opsgentic does not guess a repo).
+
+Discovery is deterministic — CRDs are read read-only via the Kubernetes API under the pod's ServiceAccount; when more than one source matches with equal confidence, the LLM picks among the candidates (hybrid).
+
+The resolved host selects a provider from the registry (`config/gitops.yaml`): each git host maps to a type (`github` / `gitea` / `gitlab`), an API base, and the env var holding that provider's token. Use a dedicated bot/service account per provider, least-privilege over the GitOps repos.
 
 ## Project layout
 
@@ -61,15 +75,17 @@ src/opsgentic/
   graph/
     state.py            # MachineState (TypedDict)
     builder.py          # StateGraph wiring + interrupt_before
-    nodes/              # rca / validation / action
+    nodes/              # rca / resolve_target / validation / action
   skills/               # Validation Skills (registry + checks)
+  mcp/                  # MCP loader + read-only context enrichment
+  gitops/               # repo resolver (argocd/flux), provider registry, PR/MR
   triggers/normalize.py # Grafana + chat -> alert_payload
-  gitops/pr.py          # PR creation (stub until M3)
   runner.py             # compiled app + checkpointer + start/approve/reject
   main.py               # FastAPI service
   cli.py                # local runner
-mcp-config/             # MCP server config (M2)
-deploy/manifests/       # K8s manifests + RBAC (M2)
+mcp-config/             # MCP server config (servers.yaml)
+config/gitops.yaml      # git provider registry (host -> provider/token)
+deploy/manifests/       # K8s manifests + read-only RBAC
 examples/               # sample grafana_alert.json / chat_input.json
 docs/figures/           # diagrams
 ```
@@ -109,8 +125,9 @@ opsgentic-api          # serves on :8080
 | GET    | `/runs/{thread_id}`           | Current run state                             |
 | POST   | `/runs/{thread_id}/approve`   | Approve the plan and open the PR              |
 | POST   | `/runs/{thread_id}/reject`    | Reject the plan                               |
+| GET    | `/ui/{thread_id}`             | Minimal HTML approval page (Approve/Reject)   |
 
-A trigger returns a `thread_id` and `awaiting_approval`; the operator then calls `approve` or `reject`.
+A trigger returns a `thread_id` and `awaiting_approval`; the operator then calls `approve`/`reject` or opens `/ui/{thread_id}` to review and decide.
 
 ## Configuration
 
@@ -121,10 +138,18 @@ A trigger returns a `thread_id` and `awaiting_approval`; the operator then calls
 | `LLM_MODEL`        | `local-model` | Model name served by vLLM.                                 |
 | `LLM_TEMPERATURE`  | `0.0`         | Sampling temperature.                                      |
 | `LLM_MAX_TOKENS`   | `4096`        | Max output tokens.                                         |
-| `GIT_PROVIDER`     | `github`      | `github` or `gitlab`.                                      |
-| `GIT_TOKEN`        | _(empty)_     | Token for opening PRs (K8s Secret when deployed).          |
-| `GIT_BASE_URL`     | _(empty)_     | GitHub Enterprise / GitLab self-hosted base URL.           |
+| `GIT_CONFIG_PATH`  | `config/gitops.yaml` | Provider registry (host -> type/api_base/token_env). |
+| `GITHUB_TOKEN`     | _(empty)_     | GitHub bot token (per the registry's `token_env`).         |
+| `GITEA_TOKEN`      | _(empty)_     | Gitea bot token.                                           |
+| `GITLAB_TOKEN`     | _(empty)_     | GitLab bot token.                                          |
+| `GIT_PROVIDER`     | `github`      | Legacy fallback type for hosts not in the registry.       |
+| `GIT_TOKEN`        | _(empty)_     | Legacy fallback token for hosts not in the registry.      |
+| `GIT_BASE_URL`     | _(empty)_     | Legacy fallback API base.                                  |
 | `MAX_RCA_ATTEMPTS` | `2`           | Self-heal loop cap before escalation.                      |
+| `MCP_ENABLED`      | `false`       | Enable read-only MCP context enrichment in the RCA agent.  |
+| `MCP_CONFIG_PATH`  | `mcp-config/servers.yaml` | Path to the MCP servers config file.           |
+| `DATABASE_URL`     | _(empty)_     | Postgres DSN for durable checkpoints. Empty -> in-memory.  |
+| `DB_POOL_MAX_SIZE` | `10`          | Postgres connection pool size.                             |
 | `LOG_LEVEL`        | `INFO`        | Log level.                                                 |
 
 Secrets are never committed: `.env` is gitignored and mapped to a Kubernetes Secret at deploy time.
@@ -136,14 +161,27 @@ docker build -t opsgentic:dev .
 docker run --rm -p 8080:8080 --env-file .env opsgentic:dev
 ```
 
+## Deploy to Kubernetes
+
+```bash
+kubectl apply -k deploy/manifests/        # namespace, read-only RBAC, ConfigMap, Deployment, Service
+kubectl -n opsgentic create secret generic opsgentic-secrets \
+  --from-literal=LLM_BASE_URL=http://vllm.vllm.svc:8000/v1 \
+  --from-literal=LLM_API_KEY=... \
+  --from-literal=GIT_TOKEN=...
+```
+
+The pod runs under the `opsgentic` ServiceAccount bound to a read-only ClusterRole (no `secrets`, no write verbs). `kubernetes-mcp-server` runs as a stdio subprocess using the pod's in-cluster credentials, so the tooling layer is read-only by RBAC regardless of agent behavior. Real values come from a Secret managed out of band (Sealed/External Secrets); `secret.example.yaml` is a template only.
+
 ## Status & roadmap
 
-- **M1 (current)** — runnable skeleton: LangGraph orchestrator, three agent nodes, Validation Skills, both triggers, `interrupt_before` approval gate, FastAPI + CLI. The LLM uses a canned fallback until configured; PR creation and MCP context are stubbed.
-- **M2** — wire read-only MCP (`kubernetes-mcp-server`, telemetry) for real `context_data`; add RBAC ClusterRole/ServiceAccount and `deploy/manifests/`; run as a Kubernetes Job.
-- **M3** — durable checkpointing (`PostgresSaver`); real PR creation (GitHub/GitLab); approval UI.
+- **M1 (done)** — runnable skeleton: LangGraph orchestrator, three agent nodes, Validation Skills, both triggers, `interrupt_before` approval gate, FastAPI + CLI.
+- **M2 (done)** — read-only MCP (`kubernetes-mcp-server`) wired into RCA for real `context_data`; read-only RBAC (ClusterRole/ServiceAccount) and `deploy/manifests/` (Deployment, Service, Job template).
+- **M3 (done)** — durable checkpointing (`PostgresSaver`, falls back to in-memory when `DATABASE_URL` is unset); real PR creation (remediation-proposal PR); minimal HTML approval page at `/ui/{thread_id}`.
+- **Multi-repo (done)** — alert→repo discovery via ArgoCD + Flux CRDs (deterministic, LLM tiebreak when ambiguous); multi-provider PR/MR (GitHub, Gitea, GitLab) via a host→provider registry with per-provider bot tokens.
 - **M4** — automatic triggering from Grafana/Alertmanager; deeper validation skills; observability/tracing.
 
 ## Notes
 
-- The M1 checkpointer is in-memory (single process); run `uvicorn` with one worker and expect state loss on restart. Replaced by Postgres in M3.
-- Agents are designed for read-only access to the cluster. All changes flow through GitOps pull requests, gated by human approval.
+- Checkpointing: set `DATABASE_URL` to use the durable `PostgresSaver` (state survives restarts and lets the Deployment scale out). Without it, an in-memory checkpointer is used — single process, state lost on restart, fine for dev.
+- Agents have read-only access to the cluster (including ArgoCD/Flux CRDs, used to map an alert to its repo). All changes flow through GitOps pull requests, gated by human approval. opsgentic only **opens** the PR; a GitOps controller (ArgoCD/Flux) applies the change after merge. A controller is optional — without one, set `gitops_repo`/`gitops_path` labels on alerts (the resolver's fallback), then merge the PR and apply via CI or `kubectl` yourself.

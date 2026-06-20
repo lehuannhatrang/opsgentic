@@ -1,0 +1,19 @@
+# Git provider registry: maps a git host -> provider type, API base, and the env
+# var holding that provider's bot token. Built-in defaults exist for github.com
+# and gitlab.com; add self-hosted hosts here. Use a dedicated bot/service account
+# per provider, scoped (least-privilege) to the GitOps repos opsgentic may touch.
+providers:
+  - host: github.com
+    type: github
+    api_base: https://api.github.com
+    token_env: GITHUB_TOKEN
+
+  # - host: gitea.example.com
+  #   type: gitea
+  #   api_base: https://gitea.example.com/api/v1
+  #   token_env: GITEA_TOKEN
+
+  # - host: gitlab.example.com
+  #   type: gitlab
+  #   api_base: https://gitlab.example.com/api/v4
+  #   token_env: GITLAB_TOKEN

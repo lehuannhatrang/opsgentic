@@ -1,0 +1,31 @@
+# One-shot diagnostic run (alternative to the always-on Deployment). The webhook
+# receiver can also create one Job per alert. Provide the alert via a ConfigMap
+# named opsgentic-alert with key alert.json, then `kubectl create -f job-template.yaml`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: opsgentic-run-
+  namespace: opsgentic
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: opsgentic
+      restartPolicy: Never
+      containers:
+        - name: opsgentic
+          image: opsgentic:dev
+          command: ["opsgentic", "--file", "/work/alert.json", "--source", "grafana"]
+          envFrom:
+            - configMapRef:
+                name: opsgentic-config
+            - secretRef:
+                name: opsgentic-secrets
+          volumeMounts:
+            - name: alert
+              mountPath: /work
+      volumes:
+        - name: alert
+          configMap:
+            name: opsgentic-alert
