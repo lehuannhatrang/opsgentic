@@ -10,7 +10,7 @@ data:
   MCP_CONFIG_PATH: "/app/mcp-config/servers.yaml"
   MCP_RECURSION_LIMIT: "12"
   K8S_MCP_URL: "http://kubernetes-mcp.opsgentic.svc:8080/mcp"
-  GITHUB_MCP_URL: "http://github-mcp.opsgentic.svc:8080/mcp"
+  GITHUB_MCP_URL: "http://github-mcp.opsgentic.svc:8082/mcp"
   DB_POOL_MAX_SIZE: "10"
   LLM_MODEL: "local-model"
   GIT_CONFIG_PATH: "/app/config/gitops.yaml"
