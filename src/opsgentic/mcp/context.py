@@ -35,7 +35,7 @@ def gather_context(alert: dict) -> dict:
         from opsgentic.mcp.loader import explain_exception
 
         detail = explain_exception(exc)
-        logger.warning("MCP context enrichment failed: %s", detail)
+        logger.warning("MCP context enrichment failed: %s", detail, exc_info=True)
         return _unavailable(f"MCP error: {detail}")
 
 
@@ -59,7 +59,10 @@ async def _gather_async(alert: dict) -> dict:
             "note": "MCP connected; LLM not configured for enrichment",
         }
 
-    agent = create_react_agent(llm, tools, prompt=_SYSTEM)
+    # checkpointer=False: do NOT inherit the parent graph's checkpointer. When this
+    # sub-agent runs inside _app.invoke(), a None checkpointer would inherit the parent's
+    # sync PostgresSaver, whose async aget_tuple is unimplemented -> NotImplementedError.
+    agent = create_react_agent(llm, tools, prompt=_SYSTEM, checkpointer=False)
     labels = alert.get("labels", {}) or {}
     human = (
         f"Alert: {alert.get('title')}\n"

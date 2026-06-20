@@ -15,7 +15,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: opsgentic
-          image: docker.io/lehuannhatrang/opsgentic:dev-0.1
+          image: docker.io/lehuannhatrang/opsgentic:dev-0.5
           command: ["opsgentic", "--file", "/work/alert.json", "--source", "grafana"]
           envFrom:
             - configMapRef:

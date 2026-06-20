@@ -38,7 +38,7 @@ def generate_edits(state: dict) -> Optional[list]:
     try:
         return asyncio.run(_run(state))
     except Exception as exc:
-        logger.warning("remediation agent failed: %s", explain_exception(exc))
+        logger.warning("remediation agent failed: %s", explain_exception(exc), exc_info=True)
         return None
 
 
@@ -63,7 +63,9 @@ async def _run(state: dict) -> Optional[list]:
         edits_by_file.setdefault(file_path, []).append({"yaml_path": yaml_path, "value": value})
         return f"recorded {file_path}: {yaml_path}={value}"
 
-    agent = create_react_agent(get_llm(), tools + [propose_edit], prompt=_SYSTEM)
+    # checkpointer=False: do not inherit the parent graph's sync PostgresSaver (its async
+    # aget_tuple is unimplemented). This sub-agent must not be checkpointed.
+    agent = create_react_agent(get_llm(), tools + [propose_edit], prompt=_SYSTEM, checkpointer=False)
 
     target = state.get("gitops_target") or {}
     svc = state.get("service_ref") or {}

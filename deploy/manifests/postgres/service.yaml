@@ -1,0 +1,16 @@
+# Internal ClusterIP service. DATABASE_URL points at postgres.opsgentic.svc:5432.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: opsgentic
+  labels:
+    app: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP

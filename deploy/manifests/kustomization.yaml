@@ -12,6 +12,9 @@ resources:
   - mcp/service.yaml
   - mcp/github-deployment.yaml
   - mcp/github-service.yaml
+  - postgres/statefulset.yaml
+  - postgres/service.yaml
   - configmap.yaml
   - deployment.yaml
   - service.yaml
+  - secrets.yaml

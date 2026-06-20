@@ -18,7 +18,7 @@ spec:
       serviceAccountName: opsgentic
       containers:
         - name: opsgentic
-          image: docker.io/lehuannhatrang/opsgentic:dev-0.1
+          image: docker.io/lehuannhatrang/opsgentic:dev-0.5
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -27,18 +27,6 @@ spec:
                 name: opsgentic-config
             - secretRef:
                 name: opsgentic-secrets
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 20
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
