@@ -8,7 +8,7 @@ images:
     newName: docker.io/lehuannhatrang/opsgentic
     newTag: dev-1.0
 
-# secret.example.yaml and job-template.yaml are templates, not part of the base apply.
+# secret.example.yaml is a template, not part of the base apply.
 resources:
   - namespace.yaml
   - rbac/serviceaccount.yaml

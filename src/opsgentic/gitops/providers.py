@@ -51,17 +51,13 @@ def _registry() -> dict:
 
 
 def get_provider(host: str) -> Optional[ProviderConfig]:
-    """Resolve a host to a provider + token. Falls back to legacy GIT_* settings."""
-    settings = get_settings()
+    """Resolve a host to a provider + token from the registry (config/gitops.yaml + built-in
+    defaults). Returns None for an unregistered host so the run escalates instead of guessing —
+    add the host to config/gitops.yaml to support it."""
     host = (host or "").lower()
     entry = _registry().get(host)
-    if entry:
-        api = entry.get("api_base") or _default_api(entry["type"], host)
-        token = os.environ.get(entry["token_env"]) if entry.get("token_env") else None
-        return ProviderConfig(host=host, type=entry["type"], api_base=api, token=token or settings.git_token)
-    # Unknown host: legacy single-provider fallback.
-    if settings.git_token:
-        ptype = settings.git_provider.lower()
-        api = settings.git_base_url or _default_api(ptype, host)
-        return ProviderConfig(host=host, type=ptype, api_base=api, token=settings.git_token)
-    return None
+    if not entry:
+        return None
+    api = entry.get("api_base") or _default_api(entry["type"], host)
+    token = os.environ.get(entry["token_env"]) if entry.get("token_env") else None
+    return ProviderConfig(host=host, type=entry["type"], api_base=api, token=token)

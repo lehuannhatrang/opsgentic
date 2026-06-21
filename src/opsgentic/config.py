@@ -31,17 +31,13 @@ class Settings(BaseSettings):
     skills_path: str = "agent-skills"
 
     # GitOps provider registry. Per-host tokens come from each provider's token_env
-    # (e.g. GITHUB_TOKEN / GITEA_TOKEN / GITLAB_TOKEN). The GIT_* fields below are a
-    # legacy single-provider fallback for hosts not in the registry.
+    # (e.g. GITHUB_TOKEN / GITEA_TOKEN / GITLAB_TOKEN) declared in config/gitops.yaml.
     git_config_path: str = "config/gitops.yaml"
     # GitHub App auth for the github provider (preferred over a static PAT).
     github_app_id: str | None = None
     github_app_installation_id: str | None = None
     github_app_private_key: str | None = None
     github_app_private_key_path: str | None = None
-    git_provider: str = "github"          # legacy fallback type
-    git_token: str | None = None          # legacy fallback token
-    git_base_url: str | None = None       # legacy fallback API base
 
     # Checkpointing. Empty database_url -> in-memory (dev, single process).
     database_url: str | None = None

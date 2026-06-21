@@ -1,5 +1,5 @@
-# Non-secret configuration. Secrets (LLM_API_KEY, GIT_TOKEN, LLM_BASE_URL) live in
-# the opsgentic-secrets Secret (see secret.example.yaml) — never in this ConfigMap.
+# Non-secret configuration. Secrets (LLM_API_KEY, LLM_BASE_URL, GITHUB_APP_PRIVATE_KEY,
+# DATABASE_URL) live in the opsgentic-secrets Secret (see secret.example.yaml) — not here.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -18,7 +18,6 @@ data:
   GIT_CONFIG_PATH: "/app/config/gitops.yaml"
   GITHUB_APP_ID: "4100865"
   GITHUB_APP_INSTALLATION_ID: "141487695"
-  GIT_PROVIDER: "github"
   MAX_RCA_ATTEMPTS: "3"
   AUTO_APPROVE: "true"
   LOG_LEVEL: "INFO"

@@ -19,3 +19,6 @@ venv/
 *.pem
 *.key
 deploy/**/secrets.yaml
+
+# Local bootstrap config (secrets)
+bootstrap.env
