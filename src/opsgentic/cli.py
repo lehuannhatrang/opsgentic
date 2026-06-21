@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 
 from opsgentic import runner
+from opsgentic.config import get_settings
 from opsgentic.triggers import normalize
 
 
 def main() -> None:
+    logging.basicConfig(level=getattr(logging, get_settings().log_level.upper(), logging.INFO))
     parser = argparse.ArgumentParser(description="Run an opsgentic graph locally.")
     parser.add_argument("--file", required=True, help="Path to alert/chat JSON")
     parser.add_argument("--source", choices=["grafana", "chat"], default="grafana")

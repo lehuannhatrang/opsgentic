@@ -6,7 +6,7 @@ kind: Kustomization
 images:
   - name: opsgentic
     newName: docker.io/lehuannhatrang/opsgentic
-    newTag: dev-1.0
+    newTag: dev-1.1
 
 # secret.example.yaml is a template, not part of the base apply.
 resources:

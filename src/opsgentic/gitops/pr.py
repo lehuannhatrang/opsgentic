@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import urllib.parse
 from typing import Optional
 
@@ -9,6 +10,8 @@ import httpx
 
 from opsgentic.gitops.providers import get_provider
 from opsgentic.gitops.yamledit import apply_ops
+
+logger = logging.getLogger(__name__)
 
 
 def create_pull_request(
@@ -64,7 +67,13 @@ def _bearer(ptype: str, cfg) -> Optional[str]:
     if ptype == "github":
         from opsgentic.gitops.github_app import github_app_token
 
-        return github_app_token(cfg.api_base) or cfg.token
+        # A GitHub App token (when the App is configured) takes precedence over the PAT.
+        app = github_app_token(cfg.api_base)
+        if app:
+            logger.info("GitHub auth: App installation token")
+            return app
+        logger.info("GitHub auth: PAT (GITHUB_TOKEN %s)", "set" if cfg.token else "MISSING")
+        return cfg.token
     return cfg.token
 
 

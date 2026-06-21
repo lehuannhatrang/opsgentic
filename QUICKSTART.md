@@ -53,20 +53,10 @@ curl -s localhost:8080/chat -XPOST -H 'content-type: application/json' \
 
 ## B. Kubernetes (end-to-end)
 
-### B1. Create a GitHub App
+### B1. Fork the demo repo + ArgoCD
 
-GitHub → **Settings → Developer settings → GitHub Apps → New GitHub App**:
-
-- **Repository permissions:** `Contents` → Read & write, `Pull requests` → Read & write.
-- Webhooks: uncheck "Active" (not needed).
-- Create it, note the **App ID**.
-- **Generate a private key** → downloads a `.pem`. Keep it safe (it is a secret).
-
-### B2. Fork the demo repo + install the App + ArgoCD
-
-1. **Fork** `github.com/lehuannhatrang/demo-workload` to your account.
-2. **Install** your GitHub App on the fork (App page → Install App → select the fork). Note the **Installation ID** (in the install URL: `.../installations/<ID>`).
-3. In **ArgoCD**, create one Application per demo app pointing at your fork (or one `ApplicationSet` over `apps/*`):
+1. **Fork** `github.com/lehuannhatrang/demo-workload` to your account — opsgentic opens remediation PRs here.
+2. In **ArgoCD**, create one Application per demo app pointing at your fork (or one `ApplicationSet` over `apps/*`):
 
    | App | Path | Scenario | opsgentic should fix |
    | --- | --- | --- | --- |
@@ -75,7 +65,21 @@ GitHub → **Settings → Developer settings → GitHub Apps → New GitHub App*
    | orders-api | `apps/orders-api` | crash-loop (early liveness probe) | raise `livenessProbe.initialDelaySeconds` |
    | inventory-api | `apps/inventory-api` | OOMKilled | raise `resources.limits.memory` |
 
-   Sync them — the workloads start failing and will fire alerts. opsgentic discovers the owning repo from these ArgoCD Applications automatically.
+   Sync them — the workloads start failing and fire alerts. opsgentic discovers the owning repo from these ArgoCD Applications automatically.
+
+### B2. GitHub auth — pick one
+
+opsgentic needs Git credentials to read your fork (via github-mcp) and open PRs.
+
+**Default — a fine-grained PAT (easiest).** GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate:
+- Repository access: only your `demo-workload` fork.
+- Permissions: `Contents` → Read & write, `Pull requests` → Read & write.
+- Put it in `GITHUB_TOKEN`. One token covers both PRs and repo reads (`GITHUB_MCP_TOKEN` defaults to it).
+
+**Optional — a GitHub App (production).** Short-lived installation tokens instead of a long-lived PAT:
+- New GitHub App; Repository permissions `Contents`: RW + `Pull requests`: RW; webhooks off; generate a private key (`.pem`); note the **App ID**.
+- Install it on your fork; note the **Installation ID** (`.../installations/<ID>`).
+- Set `GITHUB_APP_ID` / `GITHUB_APP_INSTALLATION_ID` / `GITHUB_APP_PRIVATE_KEY_PATH`, and leave `GITHUB_TOKEN` empty.
 
 ### B3. Build & push the image (Optional)
 
@@ -89,12 +93,12 @@ Set the same value in `deploy/manifests/kustomization.yaml` (`images:` → `newN
 ### B4. Bootstrap (deploy everything)
 
 ```bash
-cp bootstrap.env.example bootstrap.env     # fill in: LLM, App ID/Installation ID, .pem path, image, registry
+cp bootstrap.env.example bootstrap.env     # fill in: LLM, GITHUB_TOKEN (PAT) or App, image
 ./bootstrap.sh
 ```
 
 `bootstrap.sh` (idempotent):
-1. generates the `opsgentic-secrets` + `postgres-secrets` Secrets (`deploy/manifests/secrets.yaml`, gitignored) from `bootstrap.env` — including the GitHub App PEM and a generated Postgres password;
+1. generates the `opsgentic-secrets` + `postgres-secrets` Secrets (`deploy/manifests/secrets.yaml`, gitignored) from `bootstrap.env` — the GitHub PAT (or App PEM if you chose the App) and a generated Postgres password;
 2. sets the image in `kustomization.yaml`;
 3. `kubectl apply -k deploy/manifests/`;
 4. patches `opsgentic-config` (App IDs / model / auto-approve) and rolls out;
@@ -168,4 +172,4 @@ kubectl -n opsgentic rollout restart deploy/opsgentic deploy/opsgentic-worker
 | PR url is `stub://...` | GitHub App not configured (App ID / Installation ID / PEM) or no token. |
 | `context_data.source = stub` / proposal-only PR | MCP servers unreachable or github-mcp auth — `kubectl -n opsgentic logs deploy/opsgentic-worker`; `python -m opsgentic.mcp.diagnose`. |
 
-Full env reference: see [README.md](README.md#configuration).
+Full env reference: see [docs/USAGE.md → Configuration](docs/USAGE.md#configuration).

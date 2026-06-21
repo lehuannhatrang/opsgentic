@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from dotenv import load_dotenv
@@ -9,6 +10,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # (e.g. mcp-config/servers.yaml) resolve the same locally as from K8s env vars.
 # Does not override variables already set in the environment.
 load_dotenv()
+
+# One PAT can serve both PR creation (GITHUB_TOKEN) and github-mcp repo reads. Default the
+# github-mcp read token to GITHUB_TOKEN so a single token works everywhere; set GITHUB_MCP_TOKEN
+# explicitly only for a separate least-privilege read-only token.
+if not os.environ.get("GITHUB_MCP_TOKEN") and os.environ.get("GITHUB_TOKEN"):
+    os.environ["GITHUB_MCP_TOKEN"] = os.environ["GITHUB_TOKEN"]
 
 
 class Settings(BaseSettings):
