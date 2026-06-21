@@ -20,11 +20,13 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.2",
     "pyjwt[crypto]>=2.8",
+    "procrastinate>=3.0",
 ]
 
 [project.scripts]
 opsgentic-api = "opsgentic.main:main"
 opsgentic = "opsgentic.cli:main"
+opsgentic-worker = "opsgentic.worker:main"
 
 [build-system]
 requires = ["hatchling"]

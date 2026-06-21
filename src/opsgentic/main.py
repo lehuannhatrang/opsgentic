@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
@@ -8,7 +9,24 @@ from fastapi.responses import HTMLResponse
 from opsgentic import runner
 from opsgentic.triggers import normalize
 
-app = FastAPI(title="opsgentic")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Queue mode: bootstrap the schema (idempotent) and open the connector pool so endpoints
+    # can defer jobs. Without a queue (no DATABASE_URL) the API runs the graph in-process.
+    if runner.queue_enabled():
+        import asyncio
+
+        from opsgentic import tasks
+
+        await asyncio.to_thread(tasks.ensure_schema)
+        async with tasks.app.open_async():
+            yield
+    else:
+        yield
+
+
+app = FastAPI(title="opsgentic", lifespan=lifespan)
 
 
 @app.get("/healthz")
@@ -16,41 +34,41 @@ def healthz() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/webhook/grafana")
-def grafana_webhook(payload: dict) -> dict:
-    return runner.start_run(normalize.from_grafana(payload))
+@app.post("/webhook/grafana", status_code=202)
+async def grafana_webhook(payload: dict) -> dict:
+    return await runner.enqueue(normalize.from_grafana(payload))
 
 
-@app.post("/chat")
-def chat(payload: dict) -> dict:
-    return runner.start_run(normalize.from_chat(payload))
+@app.post("/chat", status_code=202)
+async def chat(payload: dict) -> dict:
+    return await runner.enqueue(normalize.from_chat(payload))
 
 
 @app.get("/runs/{thread_id}")
 def get_run(thread_id: str) -> dict:
-    return runner.snapshot(thread_id)
+    return runner.get_run(thread_id)
 
 
-@app.post("/runs/{thread_id}/approve")
-def approve_run(thread_id: str) -> dict:
-    return runner.approve(thread_id)
+@app.post("/runs/{thread_id}/approve", status_code=202)
+async def approve_run(thread_id: str) -> dict:
+    return await runner.enqueue_resume(thread_id, "approve")
 
 
-@app.post("/runs/{thread_id}/reject")
-def reject_run(thread_id: str) -> dict:
-    return runner.reject(thread_id)
+@app.post("/runs/{thread_id}/reject", status_code=202)
+async def reject_run(thread_id: str) -> dict:
+    return await runner.enqueue_resume(thread_id, "reject")
 
 
 @app.get("/ui/{thread_id}", response_class=HTMLResponse)
 def ui(thread_id: str) -> str:
-    return _render(runner.snapshot(thread_id))
+    return _render(runner.get_run(thread_id))
 
 
 def _render(snap: dict) -> str:
     state = snap["state"]
     plan = state.get("remediation_plan") or {}
     tid = snap["thread_id"]
-    status = state.get("execution_status", "unknown")
+    status = snap.get("status") or state.get("execution_status", "unknown")
     hypothesis = html.escape(state.get("hypothesis") or "")
     pr_url = state.get("pr_url")
 

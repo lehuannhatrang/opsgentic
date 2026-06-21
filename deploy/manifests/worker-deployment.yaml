@@ -1,27 +1,29 @@
-# Long-running webhook receiver. Single replica: the M1/M2 checkpointer is
-# in-memory (M3 moves to PostgresSaver, after which this can scale out).
+# Queue worker: consumes deferred runs (Procrastinate over Postgres) and drives the graph.
+# Same image as the API, different entrypoint (opsgentic-worker). No Service (it is a consumer).
+# The worker applies the run-status table and the Procrastinate schema on startup (idempotent).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: opsgentic
+  name: opsgentic-worker
   namespace: opsgentic
+  labels:
+    app: opsgentic-worker
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: opsgentic
+      app: opsgentic-worker
   template:
     metadata:
       labels:
-        app: opsgentic
+        app: opsgentic-worker
     spec:
       serviceAccountName: opsgentic
       containers:
-        - name: opsgentic
+        - name: worker
           image: opsgentic            # name + tag set centrally in kustomization (images:)
           imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 8080
+          command: ["opsgentic-worker"]
           envFrom:
             - configMapRef:
                 name: opsgentic-config

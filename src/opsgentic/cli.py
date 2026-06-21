@@ -18,12 +18,12 @@ def main() -> None:
         payload = json.load(f)
 
     normalizer = normalize.from_grafana if args.source == "grafana" else normalize.from_chat
-    result = runner.start_run(normalizer(payload))
+    result = runner.execute_run(normalizer(payload))   # CLI runs the graph synchronously
     print(json.dumps(result, indent=2, default=str))
 
     if result["awaiting_approval"] and args.approve:
         print("\n--- approving ---\n")
-        result = runner.approve(result["thread_id"])
+        result = runner.execute_approve(result["thread_id"])
         print(json.dumps(result, indent=2, default=str))
 
 

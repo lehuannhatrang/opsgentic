@@ -1,6 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# opsgentic app image — both the API and worker Deployments reference the logical name
+# `opsgentic`; set the real registry + tag here once (bump newTag to roll a new build).
+images:
+  - name: opsgentic
+    newName: docker.io/lehuannhatrang/opsgentic
+    newTag: dev-1.0
+
 # secret.example.yaml and job-template.yaml are templates, not part of the base apply.
 resources:
   - namespace.yaml
@@ -16,6 +23,7 @@ resources:
   - postgres/service.yaml
   - configmap.yaml
   - deployment.yaml
+  - worker-deployment.yaml
   - service.yaml
   - secrets.yaml
 
