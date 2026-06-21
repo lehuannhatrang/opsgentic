@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     mcp_config_path: str = "mcp-config/servers.yaml"
     mcp_recursion_limit: int = 25
 
+    # Agent skills: editable markdown instruction library (agent-skills/*.md), composed
+    # into each agent's system prompt by the skill's frontmatter `agents:` field.
+    skills_path: str = "agent-skills"
+
     # GitOps provider registry. Per-host tokens come from each provider's token_env
     # (e.g. GITHUB_TOKEN / GITEA_TOKEN / GITLAB_TOKEN). The GIT_* fields below are a
     # legacy single-provider fallback for hosts not in the registry.

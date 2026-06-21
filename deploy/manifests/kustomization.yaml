@@ -18,3 +18,19 @@ resources:
   - deployment.yaml
   - service.yaml
   - secrets.yaml
+
+# Agent skill prompts -> opsgentic-skills ConfigMap, mounted at /app/agent-skills.
+# Stable name (no hash suffix) so the Deployment's volume reference resolves across
+# kustomize/ArgoCD versions. After editing a skill: kubectl rollout restart deploy/opsgentic
+# (the loader reads skills once at startup, so a restart is needed regardless).
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: opsgentic-skills
+    namespace: opsgentic
+    files:
+      - agent-skills/sre.md
+      - agent-skills/gitops.md
+      - agent-skills/validation.md
+      - agent-skills/code.md

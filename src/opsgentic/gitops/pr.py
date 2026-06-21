@@ -283,3 +283,112 @@ def _gitlab_mr(*, api_base, token, plan, edits, branch, proposal_path, proposal,
             json={"source_branch": branch, "target_branch": base, "title": title, "description": body},
         ))
         return mr["web_url"]
+
+
+# --- Re-fire convergence (GitHub) -------------------------------------------
+# When an alert re-fires and an open PR already exists, evaluate what that PR already
+# proposes (base...branch) instead of recommitting a fresh — and possibly different — edit.
+
+def _github_headers(token: str) -> dict:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def remediation_branch(plan: dict, alert: Optional[dict] = None) -> str:
+    return f"opsgentic/remediation-{_issue_key(plan, alert or {})}"
+
+
+def _github_ctx(plan: dict):
+    """(api, owner, repo, token) for GitHub, or None if not GitHub / no token."""
+    cfg = get_provider(plan.get("host", "github.com"))
+    if cfg is None:
+        return None
+    if (plan.get("provider") or cfg.type) != "github":
+        return None
+    token = _bearer("github", cfg)
+    if not token:
+        return None
+    return cfg.api_base.rstrip("/"), plan["owner"], plan["repo"], token
+
+
+def find_open_remediation_pr(plan: dict, alert: Optional[dict] = None) -> Optional[dict]:
+    """Return {number, url, branch, base} for this issue's open remediation PR, else None.
+    GitHub only; other providers return None so the caller uses the first-fire path."""
+    ctx = _github_ctx(plan)
+    if ctx is None:
+        return None
+    api, owner, repo, token = ctx
+    branch = remediation_branch(plan, alert)
+    with httpx.Client(timeout=30.0, headers=_github_headers(token)) as c:
+        items = _json(c.get(f"{api}/repos/{owner}/{repo}/pulls",
+                            params={"head": f"{owner}:{branch}", "state": "open"}))
+        if not items:
+            return None
+        pr = items[0]
+        return {"number": pr["number"], "url": pr["html_url"],
+                "branch": branch, "base": (pr.get("base") or {}).get("ref")}
+
+
+def proposed_diff(plan: dict, pr_info: dict, max_chars: int = 6000) -> str:
+    """The change the open PR already proposes (base...branch), as text for the agent to assess."""
+    ctx = _github_ctx(plan)
+    if ctx is None:
+        return ""
+    api, owner, repo, token = ctx
+    with httpx.Client(timeout=30.0, headers=_github_headers(token)) as c:
+        cmp = _json(c.get(f"{api}/repos/{owner}/{repo}/compare/{pr_info.get('base')}...{pr_info['branch']}"))
+    parts = [f"--- {f.get('filename')}\n{f['patch']}" for f in cmp.get("files", []) if f.get("patch")]
+    diff = "\n\n".join(parts).strip()
+    return diff[:max_chars] if diff else "(the PR has no file changes yet)"
+
+
+def update_remediation_pr(plan: dict, pr_info: dict, *, edits: Optional[list], reason: str = "") -> str:
+    """Re-fire path: commit incremental `edits` to the branch if any actually change it; otherwise
+    post one comment noting the existing proposal already covers the alert. Returns the PR URL."""
+    ctx = _github_ctx(plan)
+    if ctx is None:
+        return pr_info.get("url", "")
+    api, owner, repo, token = ctx
+    branch = pr_info["branch"]
+    title = f"[opsgentic] {plan.get('summary', 'remediation')}"
+    with httpx.Client(timeout=30.0, headers=_github_headers(token)) as c:
+        def get_file(path, ref):
+            r = c.get(f"{api}/repos/{owner}/{repo}/contents/{path}", params={"ref": ref})
+            if r.status_code == 404:
+                return None, None
+            r.raise_for_status()
+            j = r.json()
+            if isinstance(j, list):
+                return None, None
+            return base64.b64decode(j["content"]).decode(), j["sha"]
+
+        committed = False
+        for e in (edits or []):
+            path, ops = e.get("path"), e.get("ops") or []
+            if not path or not ops:
+                continue
+            src, sha = get_file(path, branch)        # apply relative to the BRANCH (incremental)
+            if src is None:
+                continue
+            new = apply_ops(src, ops)
+            if new and new != src:
+                put = {"message": title, "content": base64.b64encode(new.encode()).decode(),
+                       "branch": branch, "sha": sha}
+                _json(c.put(f"{api}/repos/{owner}/{repo}/contents/{path}", json=put))
+                committed = True
+
+        if not committed:
+            body = f"opsgentic: alert re-fired. The existing proposal already addresses it — {reason}".strip()
+            _post_comment_once(c, api, owner, repo, pr_info["number"], body)
+        return pr_info["url"]
+
+
+def _post_comment_once(c, api, owner, repo, number, body) -> None:
+    """Post an issue comment, skipping if an identical one already exists (avoid re-fire spam)."""
+    existing = _json(c.get(f"{api}/repos/{owner}/{repo}/issues/{number}/comments", params={"per_page": 100}))
+    if any((cm.get("body") or "").strip() == body.strip() for cm in existing):
+        return
+    c.post(f"{api}/repos/{owner}/{repo}/issues/{number}/comments", json={"body": body}).raise_for_status()

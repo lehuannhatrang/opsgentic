@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from opsgentic.agent_skills import render
 from opsgentic.agents.llm import get_llm
 from opsgentic.graph.state import MachineState
 from opsgentic.mcp.context import gather_context
 
-_SYSTEM = (
+# Used when the agent-skills library is missing (the system prompt comes from the
+# 'sre' skill wired to the 'rca' agent).
+_FALLBACK = (
     "You are an SRE Root Cause Analysis agent. Given an alert payload and "
     "cluster context, produce the single most likely root cause hypothesis. "
     "Be specific and reference the evidence you used."
@@ -30,7 +33,7 @@ def rca_node(state: MachineState) -> dict:
             f"Alert:\n{alert}\n\nContext:\n{context}\n\n"
             "Return the single most likely root cause."
         )
-        resp = llm.invoke([SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)])
+        resp = llm.invoke([SystemMessage(content=render("rca", _FALLBACK)), HumanMessage(content=prompt)])
         hypothesis = resp.content if isinstance(resp.content, str) else str(resp.content)
 
     return {

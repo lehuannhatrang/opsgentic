@@ -18,7 +18,7 @@ spec:
       serviceAccountName: opsgentic
       containers:
         - name: opsgentic
-          image: docker.io/lehuannhatrang/opsgentic:dev-0.7
+          image: docker.io/lehuannhatrang/opsgentic:dev-0.9
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -27,6 +27,10 @@ spec:
                 name: opsgentic-config
             - secretRef:
                 name: opsgentic-secrets
+          volumeMounts:
+            - name: agent-skills
+              mountPath: /app/agent-skills
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -38,3 +42,7 @@ spec:
             limits:
               cpu: "1"
               memory: "1Gi"
+      volumes:
+        - name: agent-skills
+          configMap:
+            name: opsgentic-skills

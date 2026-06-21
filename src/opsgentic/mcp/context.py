@@ -3,13 +3,16 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from opsgentic.agent_skills import render
 from opsgentic.agents.llm import get_llm
 from opsgentic.config import get_settings
 from opsgentic.mcp.loader import load_connections
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = (
+# Fallback when the agent-skills library is missing (the prompt normally comes from the
+# 'sre' skill wired to the 'context' agent).
+_FALLBACK = (
     "You are an SRE diagnostics assistant with READ-ONLY access to a Kubernetes "
     "cluster and telemetry through tools. Investigate the alert by inspecting "
     "relevant pods, events, and metrics for the affected namespace and workload. "
@@ -62,7 +65,7 @@ async def _gather_async(alert: dict) -> dict:
     # checkpointer=False: do NOT inherit the parent graph's checkpointer. When this
     # sub-agent runs inside _app.invoke(), a None checkpointer would inherit the parent's
     # sync PostgresSaver, whose async aget_tuple is unimplemented -> NotImplementedError.
-    agent = create_react_agent(llm, tools, prompt=_SYSTEM, checkpointer=False)
+    agent = create_react_agent(llm, tools, prompt=render("context", _FALLBACK), checkpointer=False)
     labels = alert.get("labels", {}) or {}
     human = (
         f"Alert: {alert.get('title')}\n"

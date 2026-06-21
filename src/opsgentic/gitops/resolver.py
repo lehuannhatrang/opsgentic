@@ -172,6 +172,11 @@ def _choose(candidates: list, alert: dict) -> dict:
     return _clean(_llm_pick(tied, alert) or tied[0])
 
 
+_PICK_FALLBACK = "Map a Kubernetes alert to its owning GitOps repo."
+# Output mechanic (stays in code): the answer must be a single index we can parse.
+_PICK_RULE = "Answer with ONLY a single index number."
+
+
 def _llm_pick(tied: list, alert: dict) -> Optional[dict]:
     from opsgentic.agents.llm import get_llm
 
@@ -179,6 +184,8 @@ def _llm_pick(tied: list, alert: dict) -> Optional[dict]:
     if llm is None:
         return None
     from langchain_core.messages import HumanMessage, SystemMessage
+
+    from opsgentic.agent_skills import render
 
     listing = "\n".join(
         f"{i}. {c['repo_url']} (path={c.get('path')}, app={c.get('_app')})" for i, c in enumerate(tied)
@@ -190,7 +197,7 @@ def _llm_pick(tied: list, alert: dict) -> Optional[dict]:
     )
     try:
         resp = llm.invoke([
-            SystemMessage(content="Map a Kubernetes alert to its owning GitOps repo. Answer with a single index number."),
+            SystemMessage(content=render("resolver", _PICK_FALLBACK) + "\n\n" + _PICK_RULE),
             HumanMessage(content=prompt),
         ])
         text = resp.content if isinstance(resp.content, str) else str(resp.content)
