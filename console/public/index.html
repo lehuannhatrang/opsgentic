@@ -27,6 +27,11 @@
   a { color:var(--acc); } .mut { color:var(--mut); } .hide { display:none; }
   .kv { display:grid; grid-template-columns:240px 1fr; gap:6px 10px; align-items:center; }
   .toast { position:fixed; bottom:18px; right:18px; background:var(--panel); border:1px solid var(--line); padding:10px 14px; border-radius:6px; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:flex-start; justify-content:center; padding:48px 16px; z-index:50; }
+  .modal.hide { display:none; }
+  .modal-box { width:min(760px,94vw); max-height:86vh; overflow:auto; }
+  .modal-box .panel { margin:0; }
+  .modal-x { position:absolute; top:12px; right:16px; width:32px; height:32px; border-radius:6px; background:var(--panel); color:var(--fg); border:1px solid var(--line); cursor:pointer; font-size:15px; z-index:51; }
 </style>
 </head>
 <body>
@@ -42,16 +47,15 @@
   <span class="mut" id="apihint"></span>
 </header>
 <main>
-  <section id="tab-runs" class="hide">
+  <section id="tab-runs">
     <div class="panel">
-      <button class="act" id="r-refresh">Refresh</button>
+      <div class="mut" style="font-size:12px">Auto-refreshing every 5s</div>
       <table style="margin-top:10px"><thead><tr><th>Status</th><th>Alert</th><th>Service</th><th>Repo</th><th>Src</th><th>When</th><th>PR</th></tr></thead>
       <tbody id="r-rows"><tr><td colspan="7" class="mut">Loading…</td></tr></tbody></table>
     </div>
-    <div id="runs-run"></div>
   </section>
 
-  <section id="tab-chat">
+  <section id="tab-chat" class="hide">
     <div class="panel">
       <div class="row2">
         <div><label>Title</label><input id="c-title" value="payments-api high memory"/></div>
@@ -93,6 +97,10 @@
   </section>
 </main>
 <div id="toast"></div>
+<div id="modal" class="modal hide">
+  <button class="modal-x" id="modal-close" title="Close (Esc)">✕</button>
+  <div class="modal-box" id="modal-body"></div>
+</div>
 <script>
 const $ = (s) => document.querySelector(s);
 const j = async (m, u, b) => { const r = await fetch(u, {method:m, headers:{'content-type':'application/json'}, body:b?JSON.stringify(b):undefined}); const t = await r.text(); let d; try{d=JSON.parse(t)}catch{d=t} if(!r.ok) throw new Error((d&&d.error)||t||r.status); return d; };
@@ -104,17 +112,26 @@ function relTime(iso){ if(!iso) return ''; const s=(Date.now()-new Date(iso).get
   if(s<5400) return '1h ago'; if(s<86400) return Math.round(s/3600)+'h ago';
   if(s<172800) return '1d ago'; return Math.round(s/86400)+'d ago'; }
 
+// ---- run detail modal ----
+function openRun(id){ $('#modal').classList.remove('hide'); poll($('#modal-body'), id); }
+function closeModal(){ $('#modal').classList.add('hide'); clearInterval(pollTimer); $('#modal-body').innerHTML=''; }
+$('#modal-close').onclick=closeModal;
+$('#modal').onclick=(e)=>{ if(e.target.id==='modal') closeModal(); };
+document.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && !$('#modal').classList.contains('hide')) closeModal(); });
+
 // tabs
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
   ['chat','runs','skills','config'].forEach(t=>$('#tab-'+t).classList.toggle('hide', t!==b.dataset.tab));
-  if(b.dataset.tab==='runs') loadRuns();
+  stopRunsAuto();
+  if(b.dataset.tab==='runs') startRunsAuto();
   if(b.dataset.tab==='skills') loadSkills();
   if(b.dataset.tab==='config') loadConfig();
 });
 
 // ---- run card + polling ----
 let pollTimer=null;
+let runsTimer=null;
 function renderRun(el, r){
   const st=r.state||{}; const plan=st.remediation_plan||{}; const pr=st.pr_url;
   const stub = pr && String(pr).startsWith('stub://');
@@ -168,10 +185,12 @@ async function loadRuns(){
         +'<td class="mut" title="'+esc(r.updated_at||'')+'">'+esc(relTime(r.updated_at))+'</td>'
         +'<td>'+pr+'</td></tr>';
     }).join('');
-    tb.querySelectorAll('tr.row').forEach(tr=>tr.onclick=()=>poll($('#runs-run'), tr.dataset.id));
+    tb.querySelectorAll('tr.row').forEach(tr=>tr.onclick=()=>openRun(tr.dataset.id));
   }catch(e){ $('#r-rows').innerHTML='<tr><td colspan="7" style="color:var(--err)">'+esc(e.message)+'</td></tr>'; }
 }
-$('#r-refresh').onclick=loadRuns;
+function startRunsAuto(){ loadRuns(); clearInterval(runsTimer); runsTimer=setInterval(loadRuns, 5000); }
+function stopRunsAuto(){ clearInterval(runsTimer); }
+startRunsAuto();   // Runs is the default tab on load
 
 // ---- skills ----
 let SKILLS={};

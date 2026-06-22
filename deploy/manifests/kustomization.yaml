@@ -9,7 +9,7 @@ images:
     newTag: dev-1.3
   - name: opsgentic-console
     newName: docker.io/lehuannhatrang/opsgentic-console
-    newTag: dev-1.3
+    newTag: dev-1.4
 
 # secret.example.yaml is a template, not part of the base apply.
 resources:
