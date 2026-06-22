@@ -6,7 +6,10 @@ kind: Kustomization
 images:
   - name: opsgentic
     newName: docker.io/lehuannhatrang/opsgentic
-    newTag: dev-1.1
+    newTag: dev-1.3
+  - name: opsgentic-console
+    newName: docker.io/lehuannhatrang/opsgentic-console
+    newTag: dev-1.3
 
 # secret.example.yaml is a template, not part of the base apply.
 resources:
@@ -26,6 +29,11 @@ resources:
   - worker-deployment.yaml
   - service.yaml
   - secrets.yaml
+  - console/serviceaccount.yaml
+  - console/role.yaml
+  - console/rolebinding.yaml
+  - console/deployment.yaml
+  - console/service.yaml
 
 # Agent skill prompts -> opsgentic-skills ConfigMap, mounted at /app/agent-skills.
 # Stable name (no hash suffix) so the Deployment's volume reference resolves across

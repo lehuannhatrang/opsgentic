@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: opsgentic-console
+  namespace: opsgentic
+  labels:
+    app: opsgentic-console
+spec:
+  selector:
+    app: opsgentic-console
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      nodePort: 31090
+  type: NodePort

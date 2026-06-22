@@ -28,13 +28,15 @@ def action_node(state: MachineState, config: RunnableConfig) -> dict:
 
     run_id = (config or {}).get("configurable", {}).get("thread_id", "unknown")
     alert = state.get("alert_payload")
+    workload = state.get("service_ref")
     try:
         existing = find_open_remediation_pr(plan, alert)
         if existing:
             # Re-fire: assess what the open PR already proposes; commit an incremental fix only if
             # it is insufficient, otherwise just comment. Avoids divergent commits on every re-fire.
             sufficient, reason, edits = reassess_edits(state, proposed_diff(plan, existing))
-            pr_url = update_remediation_pr(plan, existing, edits=edits, reason=reason)
+            pr_url = update_remediation_pr(plan, existing, edits=edits, reason=reason,
+                                           alert=alert, workload=workload)
             msg = (
                 f"Re-fired alert: existing PR already addresses it — {reason}"
                 if sufficient
@@ -51,6 +53,7 @@ def action_node(state: MachineState, config: RunnableConfig) -> dict:
                 validation_report=state.get("validation_report"),
                 alert=alert,
                 edits=edits,
+                workload=workload,
             )
             msg = f"Opened remediation PR (edits the manifest; awaiting merge & GitOps sync): {pr_url}"
     except Exception as exc:

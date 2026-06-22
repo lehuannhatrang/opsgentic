@@ -85,6 +85,14 @@ def _derive_status(snap: dict) -> str:
     return snap["state"].get("execution_status") or "unknown"
 
 
+def _run_summary(snap: dict) -> dict:
+    """Resolved workload/repo from the run, to enrich the opsgentic_runs row summary."""
+    st = snap.get("state", {}) or {}
+    svc = st.get("service_ref") or {}
+    tgt = st.get("gitops_target") or {}
+    return {"service": svc.get("name"), "namespace": svc.get("namespace"), "repo": tgt.get("slug")}
+
+
 def run_and_track(thread_id: str, alert_payload: dict, auto_approve: bool | None = None) -> dict:
     """Worker entry: run the graph and record the lifecycle in opsgentic_runs."""
     from opsgentic import runs
@@ -96,6 +104,7 @@ def run_and_track(thread_id: str, alert_payload: dict, auto_approve: bool | None
         runs.set_status(thread_id, "failed", error=str(exc))
         raise
     runs.set_status(thread_id, _derive_status(snap), pr_url=snap["state"].get("pr_url"))
+    runs.set_summary(thread_id, _run_summary(snap))
     return snap
 
 
@@ -109,6 +118,7 @@ def resume_and_track(thread_id: str, decision: str) -> dict:
         runs.set_status(thread_id, "failed", error=str(exc))
         raise
     runs.set_status(thread_id, _derive_status(snap), pr_url=snap["state"].get("pr_url"))
+    runs.set_summary(thread_id, _run_summary(snap))
     return snap
 
 
@@ -146,6 +156,18 @@ async def enqueue_resume(thread_id: str, decision: str) -> dict:
 
 # --- read (polling) -------------------------------------------------------------------------
 
+def list_runs(limit: int = 50) -> list[dict]:
+    """Recent runs from opsgentic_runs (queue mode only; [] without a DB)."""
+    if not queue_enabled():
+        return []
+    from opsgentic import runs
+
+    try:
+        return runs.list_recent(limit)
+    except Exception:
+        return []
+
+
 def get_run(thread_id: str) -> dict:
     """Merge the durable run status (opsgentic_runs) with the checkpoint snapshot."""
     snap = snapshot(thread_id)
@@ -158,6 +180,7 @@ def get_run(thread_id: str) -> dict:
         except Exception:
             meta = None
     out = {**snap, "status": (meta or {}).get("status") or _derive_status(snap)}
+    out["summary"] = (meta or {}).get("summary") or {}
     if meta and meta.get("error"):
         out["error"] = meta["error"]
     return out

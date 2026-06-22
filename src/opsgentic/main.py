@@ -44,6 +44,11 @@ async def chat(payload: dict) -> dict:
     return await runner.enqueue(normalize.from_chat(payload))
 
 
+@app.get("/runs")
+def list_runs(limit: int = 50) -> list[dict]:
+    return runner.list_runs(limit)
+
+
 @app.get("/runs/{thread_id}")
 def get_run(thread_id: str) -> dict:
     return runner.get_run(thread_id)

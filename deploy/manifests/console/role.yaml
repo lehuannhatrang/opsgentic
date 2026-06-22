@@ -1,0 +1,14 @@
+# Namespaced, least-privilege: the console may read/patch the opsgentic ConfigMaps + Secret and
+# restart the Deployments. No cluster-wide access; scoped to the opsgentic namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opsgentic-console
+  namespace: opsgentic
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>OpsGentic Console</title>
+<style>
+  :root { --bg:#0f1419; --panel:#1a2230; --line:#2b3648; --fg:#e6edf3; --mut:#8b98a9; --acc:#4c8eff; --ok:#3fb950; --warn:#d29922; --err:#f85149; }
+  * { box-sizing:border-box; } body { margin:0; font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:12px; padding:12px 18px; border-bottom:1px solid var(--line); }
+  header b { font-size:16px; } header .sp { flex:1; }
+  nav button { background:none; border:none; color:var(--mut); padding:10px 14px; cursor:pointer; font:inherit; border-bottom:2px solid transparent; }
+  nav button.active { color:var(--fg); border-bottom-color:var(--acc); }
+  main { max-width:920px; margin:0 auto; padding:18px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  label { display:block; color:var(--mut); margin:8px 0 4px; font-size:12px; }
+  input, textarea, select { width:100%; background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px; font:inherit; }
+  textarea { min-height:160px; font-family:ui-monospace,monospace; }
+  button.act { background:var(--acc); color:#fff; border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font:inherit; }
+  button.act.ok { background:var(--ok); } button.act.bad { background:var(--err); } button.act:disabled { opacity:.5; cursor:default; }
+  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); font-size:13px; }
+  tr.row { cursor:pointer; } tr.row:hover { background:#0d1117; }
+  .badge { padding:2px 8px; border-radius:10px; font-size:12px; }
+  .s-queued,.s-running{background:#1f2b3d;color:var(--acc);} .s-awaiting_approval{background:#3a2f12;color:var(--warn);}
+  .s-applied{background:#16301c;color:var(--ok);} .s-failed,.s-escalated{background:#3a1d1d;color:var(--err);} .s-unknown{background:#222;color:var(--mut);}
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; } pre { background:#0d1117; padding:10px; border-radius:6px; overflow:auto; white-space:pre-wrap; }
+  a { color:var(--acc); } .mut { color:var(--mut); } .hide { display:none; }
+  .kv { display:grid; grid-template-columns:240px 1fr; gap:6px 10px; align-items:center; }
+  .toast { position:fixed; bottom:18px; right:18px; background:var(--panel); border:1px solid var(--line); padding:10px 14px; border-radius:6px; }
+</style>
+</head>
+<body>
+<header>
+  <b>🤖 OpsGentic Console</b>
+  <nav>
+    <button data-tab="runs" class="active">Runs</button>
+    <button data-tab="chat">Chat</button>
+    <button data-tab="skills">Skills</button>
+    <button data-tab="config">Config</button>
+  </nav>
+  <span class="sp"></span>
+  <span class="mut" id="apihint"></span>
+</header>
+<main>
+  <section id="tab-runs" class="hide">
+    <div class="panel">
+      <button class="act" id="r-refresh">Refresh</button>
+      <table style="margin-top:10px"><thead><tr><th>Status</th><th>Alert</th><th>Service</th><th>Repo</th><th>Src</th><th>When</th><th>PR</th></tr></thead>
+      <tbody id="r-rows"><tr><td colspan="7" class="mut">Loading…</td></tr></tbody></table>
+    </div>
+    <div id="runs-run"></div>
+  </section>
+
+  <section id="tab-chat">
+    <div class="panel">
+      <div class="row2">
+        <div><label>Title</label><input id="c-title" value="payments-api high memory"/></div>
+        <div><label>Severity</label><input id="c-sev" value="critical"/></div>
+      </div>
+      <label>Message / context</label>
+      <textarea id="c-msg" style="min-height:80px">payments-api in namespace payments is at ~85% of its memory limit and risks OOM.</textarea>
+      <div class="row2">
+        <div><label>namespace label</label><input id="c-ns" value="payments"/></div>
+        <div><label>app label</label><input id="c-app" value="payments-api"/></div>
+      </div>
+      <div style="margin-top:12px"><button class="act" id="c-send">Send to opsgentic</button></div>
+    </div>
+    <div id="chat-run"></div>
+  </section>
+
+
+  <section id="tab-skills" class="hide">
+    <div class="panel">
+      <label>Skill</label><select id="sk-sel"></select>
+      <label>Markdown (frontmatter + body)</label>
+      <textarea id="sk-body" style="min-height:320px"></textarea>
+      <div style="margin-top:12px"><button class="act" id="sk-save">Save &amp; restart</button>
+        <span class="mut">Edits patch the opsgentic-skills ConfigMap and roll the pods.</span></div>
+    </div>
+  </section>
+
+  <section id="tab-config" class="hide">
+    <div class="panel">
+      <b>Agent &amp; MCP config</b> <span class="mut">(opsgentic-config)</span>
+      <div class="kv" id="cfg-kv" style="margin-top:10px"></div>
+      <div style="margin-top:12px"><button class="act" id="cfg-save">Save &amp; restart</button></div>
+    </div>
+    <div class="panel">
+      <b>Keys</b> <span class="mut">(opsgentic-secrets — values are write-only)</span>
+      <div class="kv" id="sec-kv" style="margin-top:10px"></div>
+      <div style="margin-top:12px"><button class="act" id="sec-save">Set keys &amp; restart</button></div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const j = async (m, u, b) => { const r = await fetch(u, {method:m, headers:{'content-type':'application/json'}, body:b?JSON.stringify(b):undefined}); const t = await r.text(); let d; try{d=JSON.parse(t)}catch{d=t} if(!r.ok) throw new Error((d&&d.error)||t||r.status); return d; };
+function toast(msg, bad){ const t=$('#toast'); t.innerHTML='<div class="toast" style="border-color:'+(bad?'var(--err)':'var(--ok)')+'">'+msg+'</div>'; setTimeout(()=>t.innerHTML='',3500); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function badge(s){ return '<span class="badge s-'+esc(s||'unknown')+'">'+esc(s||'unknown')+'</span>'; }
+function relTime(iso){ if(!iso) return ''; const s=(Date.now()-new Date(iso).getTime())/1000;
+  if(s<0) return 'now'; if(s<45) return 'now'; if(s<90) return '1m ago'; if(s<3600) return Math.round(s/60)+'m ago';
+  if(s<5400) return '1h ago'; if(s<86400) return Math.round(s/3600)+'h ago';
+  if(s<172800) return '1d ago'; return Math.round(s/86400)+'d ago'; }
+
+// tabs
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
+  ['chat','runs','skills','config'].forEach(t=>$('#tab-'+t).classList.toggle('hide', t!==b.dataset.tab));
+  if(b.dataset.tab==='runs') loadRuns();
+  if(b.dataset.tab==='skills') loadSkills();
+  if(b.dataset.tab==='config') loadConfig();
+});
+
+// ---- run card + polling ----
+let pollTimer=null;
+function renderRun(el, r){
+  const st=r.state||{}; const plan=st.remediation_plan||{}; const pr=st.pr_url;
+  const stub = pr && String(pr).startsWith('stub://');
+  let ctrl='';
+  if(r.awaiting_approval) ctrl='<button class="act ok" data-a="approve">Approve</button> <button class="act bad" data-a="reject">Reject</button>';
+  const al=st.alert_payload||{}; const svc=st.service_ref||{}; const tgt=st.gitops_target||{};
+  const where=[svc.namespace,svc.name].filter(Boolean).join('/');
+  const meta='<div class="mut" style="margin:4px 0">'
+    + (al.title?'<b>'+esc(al.title)+'</b> · ':'') + (al.source?'source: '+esc(al.source)+' · ':'')
+    + (where?'workload: '+esc(where)+' · ':'') + (tgt.slug?'repo: '+esc(tgt.slug):'') + '</div>';
+  el.innerHTML = '<div class="panel"><div>' + badge(r.status) + ' <code>' + esc(r.thread_id) + '</code></div>' + meta
+    + (st.hypothesis ? '<label>Hypothesis</label><pre>' + esc(st.hypothesis) + '</pre>' : '')
+    + (plan.summary ? '<label>Plan</label><div class="mut">' + esc(plan.summary) + ' — <code>' + esc(plan.file_path || '') + '</code> @ ' + esc(plan.target_repo || '') + ' (risk: ' + esc(plan.risk || '?') + ')</div>' : '')
+    // Dòng đã được sửa:
+    + (pr ? '<p>PR: ' + (stub ? '<span class="mut">' + esc(pr) + '</span>' : '<a href="' + esc(pr) + '" target="_blank">' + esc(pr) + '</a>') + '</p>' : '')
+    + (r.error ? '<pre style="color:var(--err)">' + esc(r.error) + '</pre>' : '')
+    + '<div>' + ctrl + '</div></div>';
+  el.querySelectorAll('[data-a]').forEach(btn=>btn.onclick=async()=>{
+    try{ await j('POST','/api/runs/'+encodeURIComponent(r.thread_id)+'/'+btn.dataset.a); toast(btn.dataset.a+'d'); poll(el,r.thread_id); }catch(e){ toast(e.message,true); }
+  });
+}
+async function poll(el, id){
+  clearInterval(pollTimer);
+  const tick=async()=>{ try{ const r=await j('GET','/api/runs/'+encodeURIComponent(id)); renderRun(el,r);
+    if(['applied','failed','escalated','rejected'].includes(r.status)) clearInterval(pollTimer);
+  }catch(e){ /* keep polling */ } };
+  await tick(); pollTimer=setInterval(tick,3000);
+}
+
+// ---- chat ----
+$('#c-send').onclick=async()=>{
+  const labels={namespace:$('#c-ns').value, app:$('#c-app').value};
+  const body={title:$('#c-title').value, message:$('#c-msg').value, severity:$('#c-sev').value, labels};
+  try{ const r=await j('POST','/api/chat',body); const id=r.thread_id||(r.state&&r.thread_id); toast('queued '+esc(id)); poll($('#chat-run'), id); }
+  catch(e){ toast(e.message,true); }
+};
+
+// ---- runs list ----
+async function loadRuns(){
+  try{ const rows=await j('GET','/api/runs'); const tb=$('#r-rows');
+    if(!rows.length){ tb.innerHTML='<tr><td colspan="7" class="mut">No runs yet.</td></tr>'; return; }
+    tb.innerHTML=rows.map(r=>{ const s=r.summary||{};
+      const svc=[s.namespace,s.service].filter(Boolean).join('/');
+      const pr=(r.pr_url&&!String(r.pr_url).startsWith('stub'))?'<a href="'+esc(r.pr_url)+'" target="_blank">PR</a>':'';
+      return '<tr class="row" data-id="'+esc(r.thread_id)+'">'
+        +'<td>'+badge(r.status)+'</td>'
+        +'<td>'+esc(s.title||'—')+'</td>'
+        +'<td>'+esc(svc||'—')+'</td>'
+        +'<td class="mut">'+esc(s.repo||'—')+'</td>'
+        +'<td>'+esc(s.source||'—')+'</td>'
+        +'<td class="mut" title="'+esc(r.updated_at||'')+'">'+esc(relTime(r.updated_at))+'</td>'
+        +'<td>'+pr+'</td></tr>';
+    }).join('');
+    tb.querySelectorAll('tr.row').forEach(tr=>tr.onclick=()=>poll($('#runs-run'), tr.dataset.id));
+  }catch(e){ $('#r-rows').innerHTML='<tr><td colspan="7" style="color:var(--err)">'+esc(e.message)+'</td></tr>'; }
+}
+$('#r-refresh').onclick=loadRuns;
+
+// ---- skills ----
+let SKILLS={};
+async function loadSkills(){
+  try{ const d=await j('GET','/api/skills'); SKILLS=d.skills||{}; const sel=$('#sk-sel');
+    sel.innerHTML=Object.keys(SKILLS).map(n=>'<option>'+esc(n)+'</option>').join('');
+    sel.onchange=()=>$('#sk-body').value=SKILLS[sel.value]||''; sel.onchange();
+  }catch(e){ toast(e.message,true); }
+}
+$('#sk-save').onclick=async()=>{
+  const name=$('#sk-sel').value; try{ await j('PUT','/api/skills/'+encodeURIComponent(name),{content:$('#sk-body').value}); SKILLS[name]=$('#sk-body').value; toast('saved '+name+' + restart'); }
+  catch(e){ toast(e.message,true); }
+};
+
+// ---- config + secrets ----
+async function loadConfig(){
+  try{ const d=await j('GET','/api/config'); const cfg=d.config||{}; const sec=d.secrets||{};
+    $('#cfg-kv').innerHTML=Object.keys(cfg).sort().map(k=>'<label style="margin:0">'+esc(k)+'</label><input data-ck="'+esc(k)+'" value="'+esc(cfg[k])+'"/>').join('');
+    const KEYS=['LLM_API_KEY','LLM_BASE_URL','GITHUB_TOKEN','GITHUB_MCP_TOKEN','GITHUB_APP_PRIVATE_KEY','DATABASE_URL'];
+    const all=Array.from(new Set([...Object.keys(sec),...KEYS]));
+    $('#sec-kv').innerHTML=all.map(k=>'<label style="margin:0">'+esc(k)+' <span class="mut">'+(sec[k]?'(set)':'(empty)')+'</span></label><input data-sk="'+esc(k)+'" type="password" placeholder="set new value…"/>').join('');
+  }catch(e){ toast(e.message,true); }
+}
+$('#cfg-save').onclick=async()=>{
+  const data={}; document.querySelectorAll('[data-ck]').forEach(i=>data[i.dataset.ck]=i.value);
+  try{ await j('PUT','/api/config',{data}); toast('config saved + restart'); }catch(e){ toast(e.message,true); }
+};
+$('#sec-save').onclick=async()=>{
+  const data={}; document.querySelectorAll('[data-sk]').forEach(i=>{ if(i.value) data[i.dataset.sk]=i.value; });
+  if(!Object.keys(data).length){ toast('nothing to set'); return; }
+  try{ await j('PUT','/api/secrets',{data}); toast('keys updated + restart'); loadConfig(); }catch(e){ toast(e.message,true); }
+};
+</script>
+</body>
+</html>

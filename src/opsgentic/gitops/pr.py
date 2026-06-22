@@ -22,6 +22,7 @@ def create_pull_request(
     validation_report: Optional[dict] = None,
     alert: Optional[dict] = None,
     edits: Optional[list] = None,
+    workload: Optional[dict] = None,
 ) -> str:
     """Open OR update a remediation PR/MR for the alert's issue.
 
@@ -49,8 +50,8 @@ def create_pull_request(
         edits=edits,
         branch=f"opsgentic/remediation-{key}",
         proposal_path=_proposal_path(plan.get("path"), key),
-        proposal=_proposal_markdown(plan, key, hypothesis, validation_report),
-        title=f"[opsgentic] {plan.get('summary', 'remediation')}",
+        proposal=_proposal_markdown(plan, key, hypothesis, validation_report, alert, workload),
+        title=_pr_title(plan, alert, workload),
     )
     ctx["body"] = ctx["proposal"]
 
@@ -110,17 +111,43 @@ def _proposal_path(path: Optional[str], key: str) -> str:
     return f"{prefix}remediations/{key}.md"
 
 
-def _proposal_markdown(plan: dict, key: str, hypothesis: str, validation_report: dict) -> str:
+def _workload_ref(alert: dict, workload: Optional[dict]) -> tuple[str, str, str, str]:
+    """(alertname, kind, namespace, name) from the resolved workload, falling back to labels."""
+    labels = (alert or {}).get("labels") or {}
+    w = workload or {}
+    alertname = labels.get("alertname") or (alert or {}).get("title") or "alert"
+    kind = w.get("kind") or "Workload"
+    namespace = w.get("namespace") or labels.get("namespace") or "?"
+    name = w.get("name") or labels.get("app") or labels.get("workload") or "?"
+    return alertname, kind, namespace, name
+
+
+def _pr_title(plan: dict, alert: dict, workload: Optional[dict]) -> str:
+    """Descriptive PR title: which alert, which workload. e.g. '[opsgentic] HighPodMemory — payments/payments-api'."""
+    alertname, _kind, namespace, name = _workload_ref(alert, workload)
+    where = "/".join(p for p in (namespace, name) if p and p != "?")
+    return f"[opsgentic] {alertname}" + (f" — {where}" if where else "")
+
+
+def _proposal_markdown(plan: dict, key: str, hypothesis: str, validation_report: dict,
+                       alert: Optional[dict] = None, workload: Optional[dict] = None) -> str:
+    alert = alert or {}
+    alertname, kind, namespace, name = _workload_ref(alert, workload)
     checks = "\n".join(
         f"- {'PASS' if r.get('passed') else 'FAIL'} `{r.get('name')}` — {r.get('detail')}"
         for r in (validation_report.get("results") or [])
     )
     return (
         f"# Remediation proposal\n\n"
-        f"- Issue key: `{key}`\n"
+        f"## Alert\n"
+        f"- Source: `{alert.get('source', 'unknown')}`\n"
+        f"- Alert: `{alertname}` (severity `{alert.get('severity', 'unknown')}`)\n"
+        f"- Workload: `{kind} {namespace}/{name}`\n\n"
+        f"## Change\n"
         f"- Risk: **{plan.get('risk', 'unknown')}**\n"
-        f"- Source: `{plan.get('source', 'unknown')}`\n"
-        f"- Target: `{plan.get('file_path')}` in `{plan.get('target_repo')}`\n\n"
+        f"- Resolved via: `{plan.get('source', 'unknown')}`\n"
+        f"- Target: `{plan.get('file_path')}` in `{plan.get('target_repo')}`\n"
+        f"- Issue key: `{key}`\n\n"
         f"## Summary\n\n{plan.get('summary', '')}\n\n"
         f"## Root cause hypothesis\n\n{hypothesis or '(none)'}\n\n"
         f"## Validation\n\n{validation_report.get('summary', '')}\n\n{checks}\n"
@@ -354,7 +381,8 @@ def proposed_diff(plan: dict, pr_info: dict, max_chars: int = 6000) -> str:
     return diff[:max_chars] if diff else "(the PR has no file changes yet)"
 
 
-def update_remediation_pr(plan: dict, pr_info: dict, *, edits: Optional[list], reason: str = "") -> str:
+def update_remediation_pr(plan: dict, pr_info: dict, *, edits: Optional[list], reason: str = "",
+                          alert: Optional[dict] = None, workload: Optional[dict] = None) -> str:
     """Re-fire path: commit incremental `edits` to the branch if any actually change it; otherwise
     post one comment noting the existing proposal already covers the alert. Returns the PR URL."""
     ctx = _github_ctx(plan)
@@ -362,7 +390,7 @@ def update_remediation_pr(plan: dict, pr_info: dict, *, edits: Optional[list], r
         return pr_info.get("url", "")
     api, owner, repo, token = ctx
     branch = pr_info["branch"]
-    title = f"[opsgentic] {plan.get('summary', 'remediation')}"
+    title = _pr_title(plan, alert or {}, workload)
     with httpx.Client(timeout=30.0, headers=_github_headers(token)) as c:
         def get_file(path, ref):
             r = c.get(f"{api}/repos/{owner}/{repo}/contents/{path}", params={"ref": ref})

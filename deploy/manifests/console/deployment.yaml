@@ -1,0 +1,49 @@
+# OpsGentic Console: a small Node/Express BFF + static UI. Proxies the opsgentic API
+# (chat / runs / approve) and edits the opsgentic ConfigMaps/Secret live via the Kubernetes
+# API using the opsgentic-console ServiceAccount (namespaced RBAC).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opsgentic-console
+  namespace: opsgentic
+  labels:
+    app: opsgentic-console
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opsgentic-console
+  template:
+    metadata:
+      labels:
+        app: opsgentic-console
+    spec:
+      serviceAccountName: opsgentic-console
+      containers:
+        - name: console
+          image: opsgentic-console        # name + tag set in kustomization (images:)
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: OPSGENTIC_API_URL
+              value: "http://opsgentic.opsgentic.svc:80"
+            - name: OPSGENTIC_NAMESPACE
+              value: "opsgentic"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
