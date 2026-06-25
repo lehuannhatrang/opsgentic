@@ -16,6 +16,15 @@ servers:
     headers:                       # github-mcp-server HTTP mode authenticates per-request
       Authorization: "Bearer ${GITHUB_MCP_TOKEN}"
 
+  # Read-only Prometheus MCP server (pab1it0/prometheus-mcp-server) so the RCA/context
+  # agent can query metrics (instant/range PromQL, list_metrics, metadata, targets) and
+  # decide query parameters itself. The server reaches Prometheus directly via an
+  # in-cluster URL (PROMETHEUS_URL) with no auth. Verify tool names/path with:
+  # python -m opsgentic.mcp.diagnose
+  prometheus:
+    transport: streamable_http
+    url: ${PROMETHEUS_MCP_URL}     # e.g. http://prometheus-mcp.opsgentic.svc:8083/mcp
+
   # Local dev against a kubeconfig (no deployed server) — run via stdio instead:
   # kubernetes:
   #   transport: stdio

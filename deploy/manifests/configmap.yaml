@@ -11,6 +11,9 @@ data:
   MCP_RECURSION_LIMIT: "30"
   K8S_MCP_URL: "http://kubernetes-mcp.opsgentic.svc:8080/mcp"
   GITHUB_MCP_URL: "http://github-mcp.opsgentic.svc:8082/mcp"
+  PROMETHEUS_MCP_URL: "http://prometheus-mcp.opsgentic.svc:8083/mcp"
+  # Cluster Prometheus the prometheus-mcp server queries (in-cluster, no auth).
+  PROMETHEUS_URL: "http://kube-prometheus-stack-prometheus.prometheus.svc:9090"
   DB_POOL_MAX_SIZE: "10"
   LLM_MODEL: "qwen3:235b-instruct"
   LLM_TEMPERATURE: "0.7"

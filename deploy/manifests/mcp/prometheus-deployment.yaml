@@ -1,0 +1,60 @@
+# Read-only Prometheus MCP server (pab1it0/prometheus-mcp-server) — lets the RCA/context
+# agent query metrics via MCP (instant/range PromQL, list_metrics, metadata, targets).
+# It only makes HTTP calls to Prometheus (PROMETHEUS_URL); it has no Kubernetes API
+# access, so it runs without a dedicated ServiceAccount.
+#
+# NOTE: the exact serving env/flags depend on the prometheus-mcp-server version. Adjust
+# `image`/env, then confirm the URL/tools with: python -m opsgentic.mcp.diagnose
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-mcp
+  namespace: opsgentic
+  labels:
+    app: prometheus-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-mcp
+  template:
+    metadata:
+      labels:
+        app: prometheus-mcp
+    spec:
+      containers:
+        - name: prometheus-mcp-server
+          image: ghcr.io/pab1it0/prometheus-mcp-server:latest
+          env:
+            # Target Prometheus (in-cluster, no auth). Supplied via opsgentic-config.
+            - name: PROMETHEUS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: opsgentic-config
+                  key: PROMETHEUS_URL
+            # Serve Streamable HTTP on :8083 instead of the default stdio transport.
+            - name: PROMETHEUS_MCP_SERVER_TRANSPORT
+              value: "http"
+            - name: PROMETHEUS_MCP_BIND_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_MCP_BIND_PORT
+              value: "8083"
+          ports:
+            - name: http
+              containerPort: 8083
+          readinessProbe:
+            tcpSocket:
+              port: 8083
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"

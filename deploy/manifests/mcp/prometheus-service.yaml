@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-mcp
+  namespace: opsgentic
+spec:
+  selector:
+    app: prometheus-mcp
+  ports:
+    - name: http
+      port: 8083
+      targetPort: 8083
+      nodePort: 31083
+  type: NodePort

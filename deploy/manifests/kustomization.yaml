@@ -6,10 +6,10 @@ kind: Kustomization
 images:
   - name: opsgentic
     newName: docker.io/lehuannhatrang/opsgentic
-    newTag: dev-1.3
+    newTag: dev-1.7
   - name: opsgentic-console
     newName: docker.io/lehuannhatrang/opsgentic-console
-    newTag: dev-1.4
+    newTag: dev-1.6
 
 # secret.example.yaml is a template, not part of the base apply.
 resources:
@@ -22,6 +22,8 @@ resources:
   - mcp/service.yaml
   - mcp/github-deployment.yaml
   - mcp/github-service.yaml
+  - mcp/prometheus-deployment.yaml
+  - mcp/prometheus-service.yaml
   - postgres/statefulset.yaml
   - postgres/service.yaml
   - configmap.yaml

@@ -25,6 +25,14 @@
   .s-applied{background:#16301c;color:var(--ok);} .s-failed,.s-escalated{background:#3a1d1d;color:var(--err);} .s-unknown{background:#222;color:var(--mut);}
   .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; } pre { background:#0d1117; padding:10px; border-radius:6px; overflow:auto; white-space:pre-wrap; }
   a { color:var(--acc); } .mut { color:var(--mut); } .hide { display:none; }
+  details.tc { border:1px solid var(--line); border-radius:6px; padding:6px 10px; margin:6px 0; }
+  details.tc summary { cursor:pointer; }
+  details.tc pre { max-height:240px; margin:4px 0 8px; }
+  .grp { display:inline-block; font-size:11px; font-weight:600; padding:1px 7px; border-radius:10px;
+         background:#30363d; color:#c9d1d9; text-transform:uppercase; letter-spacing:.3px; }
+  .grp-kubernetes { background:#1f6feb; color:#fff; }
+  .grp-prometheus { background:#e6522c; color:#fff; }
+  .grp-github { background:#6e40c9; color:#fff; }
   .kv { display:grid; grid-template-columns:240px 1fr; gap:6px 10px; align-items:center; }
   .toast { position:fixed; bottom:18px; right:18px; background:var(--panel); border:1px solid var(--line); padding:10px 14px; border-radius:6px; }
   .modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:flex-start; justify-content:center; padding:48px 16px; z-index:50; }
@@ -139,12 +147,22 @@ function renderRun(el, r){
   if(r.awaiting_approval) ctrl='<button class="act ok" data-a="approve">Approve</button> <button class="act bad" data-a="reject">Reject</button>';
   const al=st.alert_payload||{}; const svc=st.service_ref||{}; const tgt=st.gitops_target||{};
   const where=[svc.namespace,svc.name].filter(Boolean).join('/');
+  // Tool-call audit trail (context_data.tool_calls): what the diagnostics agent called,
+  // with which params (PromQL/time range/labels) and the truncated result.
+  const ctx=st.context_data||{}; const calls=ctx.tool_calls||[];
+  const toolsHtml = calls.length ? '<label>Tool calls ('+calls.length+')</label>' + calls.map(c=>
+      '<details class="tc"><summary><span class="grp grp-'+esc(c.server||'unknown')+'">'+esc(c.server||'unknown')+'</span> <code>'+esc(c.name)+'</code>'
+      + (c.status && c.status!=='success' ? ' <span class="mut">['+esc(c.status)+']</span>' : '') + '</summary>'
+      + '<div class="mut">args</div><pre>'+esc(JSON.stringify(c.args||{},null,2))+'</pre>'
+      + '<div class="mut">result'+(c.result_truncated?' (truncated)':'')+'</div><pre>'+esc(c.result||'')+'</pre>'
+      + '</details>').join('') : '';
   const meta='<div class="mut" style="margin:4px 0">'
     + (al.title?'<b>'+esc(al.title)+'</b> · ':'') + (al.source?'source: '+esc(al.source)+' · ':'')
     + (where?'workload: '+esc(where)+' · ':'') + (tgt.slug?'repo: '+esc(tgt.slug):'') + '</div>';
   el.innerHTML = '<div class="panel"><div>' + badge(r.status) + ' <code>' + esc(r.thread_id) + '</code></div>' + meta
     + (st.hypothesis ? '<label>Hypothesis</label><pre>' + esc(st.hypothesis) + '</pre>' : '')
     + (plan.summary ? '<label>Plan</label><div class="mut">' + esc(plan.summary) + ' — <code>' + esc(plan.file_path || '') + '</code> @ ' + esc(plan.target_repo || '') + ' (risk: ' + esc(plan.risk || '?') + ')</div>' : '')
+    + toolsHtml
     // Dòng đã được sửa:
     + (pr ? '<p>PR: ' + (stub ? '<span class="mut">' + esc(pr) + '</span>' : '<a href="' + esc(pr) + '" target="_blank">' + esc(pr) + '</a>') + '</p>' : '')
     + (r.error ? '<pre style="color:var(--err)">' + esc(r.error) + '</pre>' : '')
