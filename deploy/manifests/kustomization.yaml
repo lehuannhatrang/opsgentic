@@ -6,10 +6,10 @@ kind: Kustomization
 images:
   - name: opsgentic
     newName: docker.io/lehuannhatrang/opsgentic
-    newTag: dev-1.7
+    newTag: dev-1.9
   - name: opsgentic-console
     newName: docker.io/lehuannhatrang/opsgentic-console
-    newTag: dev-1.6
+    newTag: dev-1.9
 
 # secret.example.yaml is a template, not part of the base apply.
 resources:
@@ -30,6 +30,7 @@ resources:
   - deployment.yaml
   - worker-deployment.yaml
   - service.yaml
+  - webhook/ingress-tailscale.yaml
   - secrets.yaml
   - console/serviceaccount.yaml
   - console/role.yaml
@@ -52,3 +53,4 @@ configMapGenerator:
       - agent-skills/gitops.md
       - agent-skills/validation.md
       - agent-skills/code.md
+      - agent-skills/pr-responder.md

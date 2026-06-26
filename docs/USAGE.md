@@ -20,6 +20,7 @@ automatically; otherwise the run pauses at `awaiting_approval` for `/runs/{id}/a
 | GET    | `/healthz`                    | Health check                                                 |
 | POST   | `/webhook/grafana`            | Grafana/Alertmanager webhook trigger → `202 {thread_id,...}` |
 | POST   | `/chat`                       | User chat trigger → `202 {thread_id,...}`                    |
+| POST   | `/webhook/github`             | GitHub PR comment agent (see [PR-COMMENT-AGENT.md](PR-COMMENT-AGENT.md)) |
 | GET    | `/runs/{thread_id}`           | Run status + state (`queued`/`running`/`awaiting_approval`/`applied`/`failed`) |
 | POST   | `/runs/{thread_id}/approve`   | Approve the plan → `202` (resume is queued)                  |
 | POST   | `/runs/{thread_id}/reject`    | Reject the plan → `202`                                      |

@@ -154,6 +154,88 @@ async def enqueue_resume(thread_id: str, decision: str) -> dict:
     return {"thread_id": thread_id, "status": "queued", "poll_url": f"/runs/{thread_id}"}
 
 
+# --- PR comment handling --------------------------------------------------------------------
+
+def handle_comment_and_track(event: dict) -> None:
+    """Worker entry for a PR comment: assemble context, run the responder, optionally commit
+    the agreed edit to the PR branch, post the reply, and record the interaction as a run row
+    so it shows in the console."""
+    from opsgentic.conversation import context as conv_context
+    from opsgentic.conversation import responder
+    from opsgentic.gitops import pr as prmod
+    from opsgentic.gitops.remediator import edits_to_ops
+
+    thread_id = f"prcomment-{event.get('comment_id')}"
+    ctx = conv_context.assemble_pr_context(event)
+    resp, tool_calls = responder.respond(ctx, event)
+    reply = resp.reply or "(no reply)"
+    committed = False
+
+    if resp.kind == "agree_and_edit" and resp.edits and ctx["pr_info"].get("branch"):
+        try:
+            ops = edits_to_ops(resp.edits)
+            if ops:
+                prmod.update_remediation_pr(
+                    ctx["plan"], ctx["pr_info"], edits=ops,
+                    reason="applied human suggestion from PR comment",
+                    alert=ctx.get("alert"), workload=ctx.get("service_ref"),
+                )
+                committed = True
+        except Exception as exc:
+            logger.warning("failed to commit suggested edits: %s", exc)
+            reply += ("\n\n_(I agreed with the change but couldn't commit it automatically; "
+                      "please apply it manually.)_")
+
+    try:
+        prmod.post_pr_comment(
+            event["owner"], event["repo"], event["pr_number"],
+            reply + prmod.AGENT_FOOTER, host=event.get("host", "github.com"),
+        )
+    except Exception as exc:
+        logger.warning("failed to post PR reply: %s", exc)
+
+    _record_comment_run(thread_id, event, ctx, resp, reply, tool_calls, committed)
+
+
+def _record_comment_run(thread_id, event, ctx, resp, reply, tool_calls, committed) -> None:
+    """Persist the comment interaction to opsgentic_runs for the console (best-effort)."""
+    if not queue_enabled():
+        return
+    from opsgentic import runs
+
+    svc = ctx.get("service_ref") or {}
+    summary = {
+        "source": "github-comment",
+        "title": ctx.get("pr_title") or f"PR #{event.get('pr_number')} comment",
+        "repo": f"{event.get('owner')}/{event.get('repo')}",
+        "namespace": svc.get("namespace"),
+        "service": svc.get("name"),
+        "kind": resp.kind,
+        "author": event.get("author_login"),
+        "comment": event.get("comment_body"),
+        "reply": reply,
+        "tool_calls": tool_calls,
+    }
+    status = "applied" if committed else "completed"
+    try:
+        runs.upsert_comment_run(thread_id, status=status, summary=summary, pr_url=event.get("pr_url"))
+    except Exception as exc:
+        logger.warning("failed to record comment run: %s", exc)
+
+
+async def enqueue_comment(event: dict) -> dict:
+    """Queue a PR comment for handling (queue mode), or run it inline (no DB / dev)."""
+    import asyncio
+
+    if not queue_enabled():
+        await asyncio.to_thread(handle_comment_and_track, event)
+        return {"status": "processed", "comment_id": event.get("comment_id")}
+    from opsgentic.tasks import handle_pr_comment
+
+    await handle_pr_comment.defer_async(event=event)
+    return {"status": "queued", "comment_id": event.get("comment_id")}
+
+
 # --- read (polling) -------------------------------------------------------------------------
 
 def list_runs(limit: int = 50) -> list[dict]:

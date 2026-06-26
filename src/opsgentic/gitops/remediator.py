@@ -81,6 +81,22 @@ class _RemediationEdits(BaseModel):
     )
 
 
+def edits_to_ops(field_edits: list) -> list:
+    """Convert structured _FieldEdit objects into the [{path, ops:[{yaml_path, value}]}]
+    form that pr.py applies via ruamel. Dedups to one op per (file, yaml_path) — last value
+    wins — since some models repeat the same field. Shared by the remediation flow and the
+    PR-responder (human-suggested edits)."""
+    by_file: dict = {}
+    for e in field_edits or []:
+        if e.file_path and e.yaml_path and e.value:
+            by_file.setdefault(e.file_path, {})[e.yaml_path] = e.value
+    return [
+        {"path": f, "ops": [{"yaml_path": yp, "value": v} for yp, v in ops.items()]}
+        for f, ops in by_file.items()
+        if ops
+    ]
+
+
 class _Reassessment(BaseModel):
     sufficient: bool = Field(description="True if the already-proposed change resolves the alert")
     reason: str = Field(default="", description="one short sentence justifying the decision")
@@ -124,15 +140,7 @@ def reassess_edits(state: dict, proposed_diff: str) -> tuple[bool, str, Optional
         )
         if res.sufficient or not res.edits:
             return True, res.reason or "existing proposal already addresses the alert", None
-        by_file: dict = {}
-        for e in res.edits:
-            if e.file_path and e.yaml_path and e.value:
-                by_file.setdefault(e.file_path, {})[e.yaml_path] = e.value
-        edits = [
-            {"path": f, "ops": [{"yaml_path": yp, "value": v} for yp, v in ops.items()]}
-            for f, ops in by_file.items()
-            if ops
-        ]
+        edits = edits_to_ops(res.edits)
         return (False, res.reason or "additional change needed", edits or None) if edits else (
             True, res.reason or "no concrete additional edit", None
         )
@@ -179,18 +187,7 @@ async def _run(state: dict) -> Optional[list]:
     structured = result.get("structured_response")
     if structured is None:
         return None
-    # Dedup: keep one op per (file, yaml_path) — last value wins. Structured output from
-    # some models repeats the same field many times; collapsing avoids a degenerate diff.
-    by_file: dict = {}
-    for e in structured.edits:
-        if e.file_path and e.yaml_path and e.value:
-            by_file.setdefault(e.file_path, {})[e.yaml_path] = e.value
-    edits = [
-        {"path": f, "ops": [{"yaml_path": yp, "value": v} for yp, v in ops.items()]}
-        for f, ops in by_file.items()
-        if ops
-    ]
-    return edits or None
+    return edits_to_ops(structured.edits) or None
 
 
 def _auth_github(connections: dict) -> None:

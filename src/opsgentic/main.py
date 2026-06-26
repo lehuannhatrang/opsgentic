@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import html
+import json
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 
 from opsgentic import runner
+from opsgentic.config import get_settings
+from opsgentic.triggers import github as gh
 from opsgentic.triggers import normalize
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -42,6 +48,64 @@ async def grafana_webhook(payload: dict) -> dict:
 @app.post("/chat", status_code=202)
 async def chat(payload: dict) -> dict:
     return await runner.enqueue(normalize.from_chat(payload))
+
+
+@app.post("/webhook/github")
+async def github_webhook(request: Request) -> Response:
+    """Handle GitHub `issue_comment` webhooks for the PR comment agent. Verifies the HMAC
+    signature, filters to PR comments that warrant a response, dedups, and enqueues."""
+    settings = get_settings()
+    body = await request.body()
+    secret = settings.github_webhook_secret
+    if secret:
+        if not gh.verify_signature(body, request.headers.get("X-Hub-Signature-256"), secret):
+            return Response(status_code=401)
+    else:
+        logger.warning("GITHUB_WEBHOOK_SECRET not set; accepting webhook unverified (dev only)")
+
+    if request.headers.get("X-GitHub-Event") != "issue_comment":
+        return Response(status_code=204)
+    event = gh.parse_comment_event(json.loads(body or b"{}"))
+    if event is None:
+        return Response(status_code=204)
+
+    handle = settings.github_agent_handle
+    if gh.is_self(event, handle):
+        return Response(status_code=204)
+
+    if runner.queue_enabled():
+        from opsgentic import runs
+
+        try:
+            if runs.is_comment_processed(event["comment_id"]):
+                return Response(status_code=204)
+        except Exception as exc:
+            logger.warning("dedup check failed: %s", exc)
+
+    try:
+        from opsgentic.gitops import pr as prmod
+
+        comments = prmod.list_pr_comments(
+            event["owner"], event["repo"], event["pr_number"],
+            limit=settings.pr_responder_max_comments, host=event.get("host", "github.com"),
+        )
+    except Exception as exc:  # mention-only fallback if the comment list is unavailable
+        logger.warning("list_pr_comments failed: %s", exc)
+        comments = []
+
+    if not gh.should_respond(event, comments, handle):
+        return Response(status_code=204)
+
+    if runner.queue_enabled():
+        from opsgentic import runs
+
+        try:
+            runs.mark_comment_processed(event["comment_id"], event.get("pr_url"))
+        except Exception as exc:
+            logger.warning("mark_comment_processed failed: %s", exc)
+
+    await runner.enqueue_comment(event)
+    return Response(status_code=202)
 
 
 @app.get("/runs")

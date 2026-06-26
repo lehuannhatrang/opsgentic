@@ -25,6 +25,13 @@ def resume_run(thread_id: str, decision: str) -> None:
     runner.resume_and_track(thread_id, decision)
 
 
+@app.task(name="handle_pr_comment", queue="remediation")
+def handle_pr_comment(event: dict) -> None:
+    from opsgentic import runner
+
+    runner.handle_comment_and_track(event)
+
+
 def ensure_schema() -> None:
     """Create the run-status table and the Procrastinate schema if missing (idempotent).
 

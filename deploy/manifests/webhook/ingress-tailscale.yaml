@@ -1,0 +1,40 @@
+# Public HTTPS for the GitHub webhook on a PRIVATE cluster, via Tailscale Funnel.
+# Funnel is an outbound tunnel — no public IP and no inbound firewall changes are needed.
+#
+# PREREQUISITES (one-time, outside this kustomize base):
+#   1. Install the Tailscale Kubernetes operator (Helm), with an OAuth client + tags:
+#        helm repo add tailscale https://pkgs.tailscale.com/helmcharts
+#        helm upgrade --install tailscale-operator tailscale/tailscale-operator \
+#          --namespace tailscale --create-namespace \
+#          --set-string oauth.clientId=<id> --set-string oauth.clientSecret=<secret> \
+#          --set-string operatorConfig.defaultTags="tag:k8s-operator"
+#   2. Enable HTTPS certs in the admin console (DNS -> MagicDNS ON + HTTPS
+#      Certificates ON), then in the tailnet ACL allow Funnel for the PROXY tag
+#      (tag:k8s by default — the ingress proxy device serves Funnel, not the operator):
+#        "nodeAttrs": [{ "target": ["tag:k8s"], "attr": ["funnel"] }]
+#      The OAuth client used for the Helm install needs scopes Devices Core (write)
+#      + Auth Keys (write), tagged tag:k8s-operator.
+#   3. Apply this Ingress. The operator provisions a Funnel device and serves it at
+#        https://opsgentic-webhook.<your-tailnet>.ts.net   (Funnel listens on :443)
+#   4. Set the GitHub App webhook URL to:
+#        https://opsgentic-webhook.<your-tailnet>.ts.net/webhook/github
+#      with the same secret as GITHUB_WEBHOOK_SECRET, and subscribe to "Issue comment".
+#
+# Clusters that already have public ingress can skip this and route /webhook/github there.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: opsgentic-webhook
+  namespace: opsgentic
+  annotations:
+    tailscale.com/funnel: "true"
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: opsgentic
+      port:
+        number: 80
+  tls:
+    - hosts:
+        - opsgentic-webhook        # -> opsgentic-webhook.<tailnet>.ts.net

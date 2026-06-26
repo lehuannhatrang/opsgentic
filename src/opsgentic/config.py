@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     github_app_private_key: str | None = None
     github_app_private_key_path: str | None = None
 
+    # PR comment agent. The webhook verifies GITHUB_WEBHOOK_SECRET (HMAC-SHA256);
+    # github_agent_handle is the literal trigger token matched in a comment body
+    # (e.g. "@opsgentic-agent ...") and the expected bot login for the self-guard.
+    github_webhook_secret: str | None = None
+    github_agent_handle: str = "opsgentic-agent"
+    pr_responder_max_comments: int = 20
+
     # Checkpointing. Empty database_url -> in-memory (dev, single process).
     database_url: str | None = None
     db_pool_max_size: int = 10

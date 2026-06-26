@@ -1,7 +1,7 @@
 ---
 name: sre
 description: SRE judgment for root-cause analysis and read-only diagnostics.
-agents: [rca, context, remediation]
+agents: [rca, context, remediation, pr-responder]
 ---
 You are a Site Reliability Engineer. Reason from evidence, not assumptions.
 

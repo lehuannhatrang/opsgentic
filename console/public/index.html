@@ -140,22 +140,38 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
 // ---- run card + polling ----
 let pollTimer=null;
 let runsTimer=null;
+// Tool-call audit trail (server/name/args/result) — shared by alert and PR-comment runs.
+function toolCallsHtml(calls){
+  calls=calls||[];
+  if(!calls.length) return '';
+  return '<label>Tool calls ('+calls.length+')</label>' + calls.map(c=>
+      '<details class="tc"><summary><span class="grp grp-'+esc(c.server||'unknown')+'">'+esc(c.server||'unknown')+'</span> <code>'+esc(c.name)+'</code>'
+      + (c.status && c.status!=='success' ? ' <span class="mut">['+esc(c.status)+']</span>' : '') + '</summary>'
+      + '<div class="mut">args</div><pre>'+esc(JSON.stringify(c.args||{},null,2))+'</pre>'
+      + '<div class="mut">result'+(c.result_truncated?' (truncated)':'')+'</div><pre>'+esc(c.result||'')+'</pre>'
+      + '</details>').join('');
+}
+// PR-comment runs have no graph checkpoint; everything to show lives in r.summary.
+function renderCommentRun(el, r){
+  const s=r.summary||{};
+  el.innerHTML='<div class="panel"><div>'+badge(r.status)+' <code>'+esc(r.thread_id)+'</code> <span class="grp">github-comment</span></div>'
+    + '<div class="mut" style="margin:4px 0"><b>'+esc(s.title||'PR comment')+'</b>'
+      + (s.repo?' · repo: '+esc(s.repo):'') + (s.kind?' · '+esc(s.kind):'') + '</div>'
+    + '<label>Human comment'+(s.author?' — '+esc(s.author):'')+'</label><pre>'+esc(s.comment||'')+'</pre>'
+    + '<label>Agent reply</label><pre>'+esc(s.reply||'')+'</pre>'
+    + toolCallsHtml(s.tool_calls)
+    + (r.pr_url?'<p>PR: <a href="'+esc(r.pr_url)+'" target="_blank">'+esc(r.pr_url)+'</a></p>':'')
+    + '</div>';
+}
 function renderRun(el, r){
+  if((r.summary||{}).source==='github-comment'){ renderCommentRun(el, r); return; }
   const st=r.state||{}; const plan=st.remediation_plan||{}; const pr=st.pr_url;
   const stub = pr && String(pr).startsWith('stub://');
   let ctrl='';
   if(r.awaiting_approval) ctrl='<button class="act ok" data-a="approve">Approve</button> <button class="act bad" data-a="reject">Reject</button>';
   const al=st.alert_payload||{}; const svc=st.service_ref||{}; const tgt=st.gitops_target||{};
   const where=[svc.namespace,svc.name].filter(Boolean).join('/');
-  // Tool-call audit trail (context_data.tool_calls): what the diagnostics agent called,
-  // with which params (PromQL/time range/labels) and the truncated result.
-  const ctx=st.context_data||{}; const calls=ctx.tool_calls||[];
-  const toolsHtml = calls.length ? '<label>Tool calls ('+calls.length+')</label>' + calls.map(c=>
-      '<details class="tc"><summary><span class="grp grp-'+esc(c.server||'unknown')+'">'+esc(c.server||'unknown')+'</span> <code>'+esc(c.name)+'</code>'
-      + (c.status && c.status!=='success' ? ' <span class="mut">['+esc(c.status)+']</span>' : '') + '</summary>'
-      + '<div class="mut">args</div><pre>'+esc(JSON.stringify(c.args||{},null,2))+'</pre>'
-      + '<div class="mut">result'+(c.result_truncated?' (truncated)':'')+'</div><pre>'+esc(c.result||'')+'</pre>'
-      + '</details>').join('') : '';
+  const toolsHtml = toolCallsHtml((st.context_data||{}).tool_calls);
   const meta='<div class="mut" style="margin:4px 0">'
     + (al.title?'<b>'+esc(al.title)+'</b> · ':'') + (al.source?'source: '+esc(al.source)+' · ':'')
     + (where?'workload: '+esc(where)+' · ':'') + (tgt.slug?'repo: '+esc(tgt.slug):'') + '</div>';
@@ -174,7 +190,7 @@ function renderRun(el, r){
 async function poll(el, id){
   clearInterval(pollTimer);
   const tick=async()=>{ try{ const r=await j('GET','/api/runs/'+encodeURIComponent(id)); renderRun(el,r);
-    if(['applied','failed','escalated','rejected'].includes(r.status)) clearInterval(pollTimer);
+    if(['applied','failed','escalated','rejected','completed'].includes(r.status)) clearInterval(pollTimer);
   }catch(e){ /* keep polling */ } };
   await tick(); pollTimer=setInterval(tick,3000);
 }

@@ -429,3 +429,71 @@ def _post_comment_once(c, api, owner, repo, number, body) -> None:
     if any((cm.get("body") or "").strip() == body.strip() for cm in existing):
         return
     c.post(f"{api}/repos/{owner}/{repo}/issues/{number}/comments", json={"body": body}).raise_for_status()
+
+
+# --- PR conversation (the PR comment agent) ---------------------------------
+# Marker appended to every agent reply so the webhook's listen-rule can recognize the
+# agent's own prior comments (and skip them) without relying on a bot login.
+AGENT_FOOTER = "\n\n<!-- opsgentic-agent -->"
+
+
+def _github_api_token(host: str = "github.com") -> Optional[tuple]:
+    """(api_base, token) for GitHub via the provider registry + App/PAT, or None."""
+    cfg = get_provider(host)
+    if cfg is None or cfg.type != "github":
+        return None
+    token = _bearer("github", cfg)
+    if not token:
+        return None
+    return cfg.api_base.rstrip("/"), token
+
+
+def get_pr(owner: str, repo: str, number: int, host: str = "github.com") -> Optional[dict]:
+    """Fetch a PR (title/body/head/base) — used to recover branch + context for a comment."""
+    ctx = _github_api_token(host)
+    if ctx is None:
+        return None
+    api, token = ctx
+    with httpx.Client(timeout=30.0, headers=_github_headers(token)) as c:
+        r = c.get(f"{api}/repos/{owner}/{repo}/pulls/{number}")
+        if r.status_code == 404:
+            return None
+        return _json(r)
+
+
+def list_pr_comments(owner: str, repo: str, number: int, limit: int = 20,
+                     host: str = "github.com") -> list[dict]:
+    """Return the most recent `limit` PR conversation comments (oldest-first), normalized
+    to {id, body, login, type, app_slug} for dialogue context and the listen rule."""
+    ctx = _github_api_token(host)
+    if ctx is None:
+        return []
+    api, token = ctx
+    with httpx.Client(timeout=30.0, headers=_github_headers(token)) as c:
+        items = _json(c.get(f"{api}/repos/{owner}/{repo}/issues/{number}/comments",
+                            params={"per_page": 100}))
+    out = [
+        {
+            "id": cm.get("id"),
+            "body": cm.get("body") or "",
+            "login": (cm.get("user") or {}).get("login"),
+            "type": (cm.get("user") or {}).get("type"),
+            "app_slug": (cm.get("performed_via_github_app") or {}).get("slug")
+            if cm.get("performed_via_github_app") else None,
+        }
+        for cm in items
+    ]
+    return out[-limit:]
+
+
+def post_pr_comment(owner: str, repo: str, number: int, body: str,
+                    host: str = "github.com") -> None:
+    """Post a new PR conversation comment (always posts — unlike _post_comment_once)."""
+    ctx = _github_api_token(host)
+    if ctx is None:
+        logger.warning("post_pr_comment: no GitHub token for %s/%s#%s", owner, repo, number)
+        return
+    api, token = ctx
+    with httpx.Client(timeout=30.0, headers=_github_headers(token)) as c:
+        c.post(f"{api}/repos/{owner}/{repo}/issues/{number}/comments",
+               json={"body": body}).raise_for_status()

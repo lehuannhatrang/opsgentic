@@ -21,6 +21,9 @@ data:
   GIT_CONFIG_PATH: "/app/config/gitops.yaml"
   GITHUB_APP_ID: "4100865"
   GITHUB_APP_INSTALLATION_ID: "141487695"
+  # PR comment agent: literal trigger token matched in a comment body ("@<handle> ...")
+  # and the expected bot login for the self-guard. The webhook secret is in the Secret.
+  GITHUB_AGENT_HANDLE: "opsgentic-agent"
   MAX_RCA_ATTEMPTS: "3"
   AUTO_APPROVE: "true"
   LOG_LEVEL: "INFO"
