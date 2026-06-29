@@ -36,7 +36,7 @@ CLUSTER_CHOICE="${CLUSTER_CHOICE:-}"     # k8s (current context) | k3d | minikub
 LOCAL_CLUSTER_NAME="${LOCAL_CLUSTER_NAME:-opsgentic-demo}"
 
 # ---- pretty logging --------------------------------------------------------
-if [ -t 1 ]; then C_B='\033[1m'; C_G='\033[32m'; C_Y='\033[33m'; C_R='\033[31m'; C_0='\033[0m'; else C_B=; C_G=; C_Y=; C_R=; C_0=; fi
+if [ -t 1 ]; then C_B=$'\033[1m'; C_G=$'\033[32m'; C_Y=$'\033[33m'; C_R=$'\033[31m'; C_0=$'\033[0m'; else C_B=; C_G=; C_Y=; C_R=; C_0=; fi
 step() { printf "\n${C_B}==> %s${C_0}\n" "$*"; }
 info() { printf "    %s\n" "$*"; }
 ok()   { printf "    ${C_G}ok${C_0} %s\n" "$*"; }
@@ -259,7 +259,8 @@ BOOT_ENV="$REPO_ROOT/bootstrap.env"
 } > "$BOOT_ENV"
 chmod 600 "$BOOT_ENV"
 ok "wrote $BOOT_ENV (chmod 600)"
-"$REPO_ROOT/bootstrap.sh" "$BOOT_ENV"
+# bootstrap.sh cd's to the repo root and sources "./$1", so pass a basename, not an absolute path.
+"$REPO_ROOT/bootstrap.sh" "bootstrap.env"
 
 # ===========================================================================
 ARGO_PW="$(kubectl -n "$ARGOCD_NS" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo '<not-found>')"
