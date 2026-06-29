@@ -1,9 +1,10 @@
 # OpsGentic — Quickstart
 
-Two ways to run opsgentic:
+Three ways to run opsgentic:
 
+- **[0) One-command demo](#0-one-command-demo)** — `./hack/demo-up.sh` brings up the cluster, ArgoCD, Prometheus, the demo apps, and opsgentic. Start here.
 - **[A) Local dev](#a-local-dev)** — no cluster, fastest, for trying the graph and editing prompts.
-- **[B) Kubernetes](#b-kubernetes-end-to-end)** — full end-to-end: GitHub App + ArgoCD + Alertmanager → opsgentic opens a real remediation PR.
+- **[B) Kubernetes (manual)](#b-kubernetes-end-to-end)** — the full end-to-end path done by hand, for when you want to control each step.
 
 **End state (Path B):** a failing demo workload fires an alert → Alertmanager calls opsgentic → opsgentic runs RCA → Validation → Remediation and opens a GitOps PR on **your fork** of the demo repo → you (or PR review) approve → ArgoCD applies the fix.
 
@@ -24,6 +25,39 @@ demo app (failing) --alert--> Alertmanager --webhook--> opsgentic API --queue-->
 | Local dev | Python 3.11+; a vLLM / OpenAI-compatible endpoint + key (optional — empty falls back to a canned response) |
 | Kubernetes | A cluster + `kubectl`; `kustomize` (or `kubectl` ≥ 1.27 with `-k`); a container registry; **kube-prometheus-stack** (Prometheus Operator + Alertmanager); **ArgoCD**; a GitHub account |
 | Both | `openssl`, `jq` (handy for the test commands) |
+
+---
+
+## 0. One-command demo
+
+The fastest way to see the whole loop. One script provisions everything and wires it together:
+
+```bash
+./hack/demo-up.sh
+```
+
+It walks you through, in order:
+
+1. **Cluster** — uses your current `kubectl` context if a cluster is reachable; otherwise offers to spin up a local **k3d / minikube / kind** cluster (handy if you don't want to install Kubernetes).
+2. **GitHub auth** — prints the [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) creation link (needs `Contents`, `Pull requests`, and `Administration` → Read & write), reads your token, and **forks `lehuannhatrang/demo-workload` into your account automatically**.
+3. **LLM** — asks for an OpenAI-compatible endpoint; leave it blank to use the built-in canned-response fallback.
+4. **Helm installs** — **ArgoCD** and **kube-prometheus-stack** (Prometheus + Alertmanager), with the Alertmanager selectors pre-configured so the demo's cross-namespace routes are picked up (no manual step B5).
+5. **Demo workloads** — creates one ArgoCD Application per app in `apps/*` pointing at **your fork**, with auto-sync. The apps start failing and firing alerts.
+6. **OpsGentic** — generates `bootstrap.env` from your answers and runs `./bootstrap.sh`.
+
+The script is **idempotent** — re-run it any time. When it finishes it prints the access URLs (ArgoCD, Prometheus/Grafana, the opsgentic API + console) and a one-line `curl` to verify end-to-end. Any prompt can be pre-answered with an env var (e.g. `GITHUB_TOKEN=… LLM_BASE_URL=… ./hack/demo-up.sh`).
+
+> The generated `bootstrap.env` contains your PAT and is gitignored — never commit it.
+
+Tear everything down (Helm releases, opsgentic, demo apps) with:
+
+```bash
+./hack/demo-down.sh
+```
+
+It leaves your cluster running and just prints the command to delete a local cluster if you made one.
+
+For the manual, step-by-step version of this same flow, read on (paths A and B).
 
 ---
 

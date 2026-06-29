@@ -59,6 +59,15 @@ Deep dive: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## 🚀 Quick start
 
+**One-command demo** — provisions the cluster (or a local k3d/minikube/kind), ArgoCD, Prometheus,
+the demo apps, and opsgentic; forks the demo repo for you and only asks for a GitHub PAT:
+
+```bash
+./hack/demo-up.sh        # idempotent; ./hack/demo-down.sh to tear it down
+```
+
+**Local dev** — no cluster, just the graph:
+
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e .
@@ -68,8 +77,8 @@ cp .env.example .env          # set LLM_BASE_URL / LLM_API_KEY (empty = canned f
 opsgentic --file examples/grafana_alert.json --source grafana --approve
 ```
 
-Deploy the end-to-end demo on Kubernetes (GitHub auth, ArgoCD, Alertmanager webhook, a one-shot
-`bootstrap.sh`): **[QUICKSTART.md](QUICKSTART.md)**.
+Full walkthrough — one-command demo, local dev, and the manual end-to-end Kubernetes path
+(GitHub auth, ArgoCD, Alertmanager webhook, `bootstrap.sh`): **[QUICKSTART.md](QUICKSTART.md)**.
 
 ## 📚 Documentation
 
