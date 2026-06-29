@@ -10,13 +10,21 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Kubernetes-GitOps-326ce5?logo=kubernetes&logoColor=white" alt="Kubernetes"/>
-  <img src="https://img.shields.io/badge/LangGraph-multi--agent-1c3c3c" alt="LangGraph"/>
-  <img src="https://img.shields.io/badge/MCP-read--only-444" alt="MCP"/>
-  <img src="https://img.shields.io/badge/LLM-vLLM%20%7C%20OpenAI--compatible-412991" alt="LLM"/>
+  <a href="https://lehuannhatrang.github.io/opsgentic/"><img src="https://img.shields.io/badge/Website-opsgentic.io-2ea44f" alt="OpsGentic website"/></a>
+  <img src="https://img.shields.io/badge/Kubernetes-GitOps-326ce5?logo=kubernetes&logoColor=white" alt="Kubernetes GitOps"/>
+  <img src="https://img.shields.io/badge/LangGraph-multi--agent-1c3c3c" alt="LangGraph multi-agent"/>
+  <img src="https://img.shields.io/badge/MCP-read--only-444" alt="Model Context Protocol"/>
+  <img src="https://img.shields.io/badge/LLM-vLLM%20%7C%20OpenAI--compatible-412991" alt="vLLM / OpenAI-compatible LLM"/>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-green" alt="License: GPLv3"/></a>
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs welcome"/>
+</p>
+
+<p align="center">
+  🌐 <b><a href="https://lehuannhatrang.github.io/opsgentic/">Website &amp; Documentation</a></b>
+  &nbsp;·&nbsp; <a href="QUICKSTART.md">Quickstart</a>
+  &nbsp;·&nbsp; <a href="docs/ARCHITECTURE.md">Architecture</a>
+  &nbsp;·&nbsp; <a href="https://github.com/lehuannhatrang/opsgentic">GitHub</a>
 </p>
 
 ---
@@ -25,10 +33,12 @@
 
 > No kubectl, no manual patching.
 
-OpsGentic is an open-source **AIOps / agentic SRE** system for Kubernetes. A multi-agent
-[LangGraph](https://github.com/langchain-ai/langgraph) pipeline diagnoses incidents from
-Prometheus/Alertmanager alerts (or a chat message), and remediates **through GitOps** — every
-change is a reviewable pull request, never a live `kubectl` mutation.
+**OpsGentic** is an open-source **AIOps / agentic SRE** platform for **Kubernetes incident response
+and auto-remediation**. A multi-agent [LangGraph](https://github.com/langchain-ai/langgraph)
+pipeline performs automated **root cause analysis** on Prometheus/Alertmanager alerts (or a chat
+message), then remediates **through GitOps** — every change is a reviewable pull request opened on
+your **ArgoCD/Flux** repo, never a live `kubectl` mutation. Think of it as an **AI SRE agent** that
+turns alerts into self-healing infrastructure, with a human in the loop.
 
 ## ✨ Why OpsGentic
 
@@ -84,6 +94,7 @@ Full walkthrough — one-command demo, local dev, and the manual end-to-end Kube
 
 | Doc | What's inside |
 | --- | --- |
+| [Website](https://lehuannhatrang.github.io/opsgentic/) | Project homepage & docs hub |
 | [QUICKSTART.md](QUICKSTART.md) | Install & run — dev + Kubernetes, GitHub auth, ArgoCD, Alertmanager webhook, troubleshooting |
 | [docs/USAGE.md](docs/USAGE.md) | HTTP API, triggers, full configuration reference, editing agent skills, deploy |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Agents, async queue/worker, graph flow, remediation & convergence, multi-repo resolution |
@@ -97,11 +108,36 @@ Full walkthrough — one-command demo, local dev, and the manual end-to-end Kube
 - ✅ Editable agent-skill prompt library (ConfigMap)
 - ⏳ Deeper validation skills; observability/tracing; worker autoscaling
 
+## ❓ FAQ
+
+**What is OpsGentic?**
+An open-source AI agent for Kubernetes incident response. It reads Prometheus/Alertmanager alerts,
+runs automated root cause analysis with a multi-agent LangGraph pipeline, and opens a GitOps pull
+request with a minimal manifest fix — self-healing Kubernetes with a human in the loop.
+
+**How does OpsGentic remediate incidents without `kubectl`?**
+It never mutates the cluster directly. All cluster and repo reads go through read-only MCP servers,
+and every change is written as a pull request on your GitOps repo, which ArgoCD or Flux applies
+after merge.
+
+**Which LLMs does it support?**
+Any OpenAI-compatible endpoint — a self-hosted **vLLM** server, OpenAI, or other compatible APIs —
+configured via environment variables.
+
+**Does it work with ArgoCD and Flux?**
+Yes. OpsGentic is GitOps-native and multi-repo: it discovers the owning repository from your
+ArgoCD/Flux Applications and supports GitHub, GitLab, and Gitea.
+
+**How do I try it quickly?**
+Run `./hack/demo-up.sh` for a one-command demo (cluster + ArgoCD + Prometheus + demo apps), or use
+the local-dev path with no cluster. See the **[Quickstart](QUICKSTART.md)**.
+
 ## 🤝 Contributing
 
 Issues and PRs are welcome. Licensed under **[GPLv3](LICENSE)**.
+Website & docs: **https://lehuannhatrang.github.io/opsgentic/**
 
 ---
 
-<sub>Keywords: Kubernetes · SRE · DevOps · AIOps · AI agent · multi-agent · LLM · LangGraph · MCP · auto-remediation · self-healing · root cause analysis · GitOps · ArgoCD · Flux · Prometheus · Alertmanager · incident response</sub>
+<sub>Keywords: Kubernetes · Kubernetes incident response · SRE · DevOps · AIOps · AI SRE agent · AI agent · agentic AI · multi-agent · LLM · vLLM · LangGraph · MCP · Model Context Protocol · auto-remediation · self-healing Kubernetes · self-healing infrastructure · root cause analysis · RCA · GitOps · ArgoCD · Flux · Prometheus · Alertmanager · alert remediation · incident response automation · pull request automation</sub>
 
