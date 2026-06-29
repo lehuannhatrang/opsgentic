@@ -117,11 +117,13 @@ if [ -z "$GITHUB_TOKEN" ]; then
 
     Configure it as:
       - Resource owner:     your account
-      - Repository access:  All repositories (so it can fork), or add the fork after.
-      - Permissions:
-          Repository -> Contents          : Read and write
-          Repository -> Pull requests     : Read and write
-          Repository -> Administration    : Read and write   (needed to create the fork)
+      - Repository access:  "All repositories"  (or "Only select repositories" -> add
+                            your ${DEMO_REPO} fork). Do NOT pick "Public repositories
+                            (read-only)" — that grants read only and PR creation will 403.
+      - Permissions (Repository):
+          Contents          : Read and write
+          Pull requests     : Read and write
+          Administration    : Read and write   (needed to create the fork)
 
 EOF
   read -r -s -p "    Paste PAT (hidden): " GITHUB_TOKEN; echo
@@ -155,6 +157,16 @@ else
   done
 fi
 FORK_URL="https://github.com/${GH_USER}/${DEMO_REPO}.git"
+
+# Fail fast if the PAT can read but not WRITE the repo (the usual "read-only PAT" mistake):
+# opsgentic needs push to create the remediation branch, else PR creation 403s at runtime.
+CAN_PUSH="$(gh_api GET "/repos/${GH_USER}/${DEMO_REPO}" | jq -r '.permissions.push // false')"
+if [ "$CAN_PUSH" != true ]; then
+  die "PAT can read but not write ${GH_USER}/${DEMO_REPO} (.permissions.push=false).
+       Re-create the token with Contents + Pull requests = Read AND write on this repo
+       (not 'Public repositories (read-only)'), then re-run."
+fi
+ok "PAT has write access (push) to ${GH_USER}/${DEMO_REPO}"
 
 # ===========================================================================
 step "LLM endpoint (optional — leave blank for the canned-response fallback)"
