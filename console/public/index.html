@@ -211,7 +211,7 @@ function renderRun(el, r){
     + (st.hypothesis ? '<label>Hypothesis</label><pre>' + esc(st.hypothesis) + '</pre>' : '')
     + (plan.summary ? '<label>Plan</label><div class="mut">' + esc(plan.summary) + ' — <code>' + esc(plan.file_path || '') + '</code> @ ' + esc(plan.target_repo || '') + ' (risk: ' + esc(plan.risk || '?') + ')</div>' : '')
     + toolsHtml
-    // Dòng đã được sửa:
+    // Render stub PR URLs as plain text; real URLs as links.
     + (pr ? '<p>PR: ' + (stub ? '<span class="mut">' + esc(pr) + '</span>' : '<a href="' + esc(pr) + '" target="_blank">' + esc(pr) + '</a>') + '</p>' : '')
     + (r.error ? '<pre style="color:var(--err)">' + esc(r.error) + '</pre>' : '')
     + '<div>' + ctrl + '</div></div>';
@@ -326,7 +326,7 @@ function cyStyle(){ return [
 function graphToElements(g){
   const els=[];
   (g.nodes||[]).forEach(n=>{
-    const d={ id:n.id, label:n.label, type:n.type, group:n.group||'' };
+    const d={ id:n.id, label:n.label, type:n.type, group:n.group||'', agents:n.agents||[] };
     if(n.type==='server') d.color=SERVER_COLORS[n.label]||'#3a3f4b';
     els.push({ data:d });
   });
@@ -336,12 +336,20 @@ function graphToElements(g){
   return els;
 }
 
+function gLayout(){
+  // breadthfirst needs a valid root; PR-comment run graphs have no START node.
+  const roots = CY && CY.nodes('[id = "START"]').length ? ['START'] : undefined;
+  return { name:'breadthfirst', directed:true, spacingFactor:1.2, padding:20, roots };
+}
 function renderGraph(g){
+  if(CY) CY.destroy();
+  const hasStart=(g.nodes||[]).some(n=>n.id==='START');
   CY = cytoscape({ container:$('#cy'), elements:graphToElements(g), style:cyStyle(),
     layout:{ name:'breadthfirst', directed:true, spacingFactor:1.2, padding:20,
-      roots:['START'] }, wheelSensitivity:0.2 });
-  CY.on('tap','node[type="server"]', (evt)=>expandServerTools(evt.target));
-  CY.on('tap','node', (evt)=>showNodeDetail(evt.target.id()));
+      roots:hasStart?['START']:undefined }, wheelSensitivity:0.2 });
+  CY.on('tap','node[type="server"]', (evt)=>{ expandServerTools(evt.target); });
+  // Skip server nodes here so a server tap only expands (both handlers fire otherwise).
+  CY.on('tap','node', (evt)=>{ if(evt.target.data('type')!=='server') showNodeDetail(evt.target.id()); });
   return CY;
 }
 
@@ -365,14 +373,16 @@ async function expandServerTools(node){
       CY.add([{ data:{ id:tid, label:t, type:'tool', group:server } },
               { data:{ id:tid+'-e', source:id, target:tid, kind:'uses-tool', conditional:'no' } }]);
     });
-    CY.layout({ name:'breadthfirst', directed:true, spacingFactor:1.2, padding:20, roots:['START'] }).run();
+    CY.layout(gLayout()).run();
     $('#g-status').textContent='';
   }catch(e){ $('#g-status').textContent=e.message; }
 }
 function showNodeDetail(id){
   const n=CY.getElementById(id); if(!n||!n.length) return;
+  clearInterval(pollTimer);   // a run-detail modal may have left this ticking
   const d=n.data(); const tc=(GRUN&&GRUN.tool_calls&&GRUN.tool_calls[id])||[];
   let body='<div class="panel"><div><b>'+esc(d.label)+'</b> <span class="grp">'+esc(d.type)+'</span></div>';
+  if(d.agents && d.agents.length) body+='<div class="mut" style="margin:4px 0">agents: '+esc(d.agents.join(', '))+'</div>';
   if(GRUN && GRUN.run && (id==='rca')) body+=(GRUN.run.hypothesis?'<label>Hypothesis</label><pre>'+esc(GRUN.run.hypothesis)+'</pre>':'');
   if(GRUN && GRUN.run && (id==='action')){ const p=GRUN.run.remediation_plan||{};
     if(p.summary) body+='<label>Plan</label><div class="mut">'+esc(p.summary)+' — <code>'+esc(p.file_path||'')+'</code></div>'; }
@@ -391,11 +401,13 @@ $('#g-mode-run').onclick=()=>{ GMODE='run';
 async function loadRunPicker(){
   try{
     const rows=await j('GET','/api/runs'); const sel=$('#g-run-sel');
+    const prev=sel.value;   // preserve the user's current selection across re-entry
     sel.innerHTML='<option value="">— pick a run —</option>'+rows.map(r=>{
       const s=r.summary||{}; const lbl=(s.title||r.thread_id)+' · '+r.status;
       return '<option value="'+esc(r.thread_id)+'">'+esc(lbl)+'</option>'; }).join('');
     sel.onchange=()=>{ if(sel.value) loadRunGraph(sel.value); };
-    if(rows.length){ sel.value=rows[0].thread_id; loadRunGraph(rows[0].thread_id); }
+    const keep=prev && rows.some(r=>r.thread_id===prev) ? prev : (rows[0] && rows[0].thread_id);
+    if(keep){ sel.value=keep; if(!GRUN || prev!==keep) loadRunGraph(keep); }
   }catch(e){ $('#g-status').textContent=e.message; }
 }
 function applyRunOverlay(g){
@@ -408,7 +420,7 @@ function applyRunOverlay(g){
       else if(st==='pending') n.addClass('dimmed');
     }
     const tc=(g.tool_calls||{})[id]||[];
-    if(tc.length){ n.data('blabel', d.label+'  ['+tc.length+' tool]'); n.addClass('badge'); }
+    if(tc.length){ n.data('blabel', d.label+'  ['+tc.length+(tc.length===1?' tool]':' tools]')); n.addClass('badge'); }
   });
 }
 async function loadRunGraph(id){

@@ -95,3 +95,68 @@ def test_list_server_tools_unknown_server_returns_empty():
     assert out["server"] == "does-not-exist"
     assert out["tools"] == []
     assert out["error"]
+
+
+class _FakeApp:
+    def __init__(self, history):
+        self._history = history
+
+    def get_state_history(self, _cfg):
+        return list(self._history)
+
+
+def test_build_run_graph_awaiting_approval_overlay(monkeypatch):
+    from opsgentic import runner
+
+    # newest-first history (build_run_graph reverses it): rca -> resolve -> validation ran.
+    history = [
+        _Snap({"source": "loop", "writes": {"validation": {}}}),
+        _Snap({"source": "loop", "writes": {"resolve_target": {}}}),
+        _Snap({"source": "loop", "writes": {"rca": {}}}),
+        _Snap({"source": "input", "writes": None}),
+    ]
+    snap = {
+        "thread_id": "t1",
+        "status": "awaiting_approval",
+        "next": ["action"],
+        "summary": {},
+        "state": {
+            "hypothesis": "memory limit too low",
+            "context_data": {"tool_calls": [{"server": "kubernetes", "name": "pods_list"}]},
+            "remediation_plan": {"summary": "bump limit"},
+        },
+    }
+    monkeypatch.setattr(runner, "get_run", lambda tid: snap)
+    monkeypatch.setattr(runner, "_config", lambda tid: {})
+    monkeypatch.setattr(runner, "_app", _FakeApp(history))
+
+    g = graphview.build_run_graph("t1")
+    status = {n["id"]: n.get("status") for n in g["nodes"] if n.get("group") == "flow" and n["type"] == "agent"}
+    assert status["rca"] == "ran"
+    assert status["resolve_target"] == "ran"
+    assert status["validation"] == "ran"
+    assert status["action"] == "current"          # interrupt_before -> next node
+    assert [s["node"] for s in g["executed"]] == ["rca", "resolve_target", "validation"]
+    assert g["tool_calls"]["rca"]                  # context tool calls surfaced on rca
+    assert g["run"]["hypothesis"] == "memory limit too low"
+
+
+def test_build_run_graph_pr_comment_path(monkeypatch):
+    from opsgentic import runner
+
+    snap = {
+        "thread_id": "prcomment-42",
+        "status": "completed",
+        "summary": {"source": "github-comment", "kind": "answer",
+                    "reply": "here is the evidence", "comment": "why?",
+                    "tool_calls": [{"server": "github", "name": "get_file_contents"}]},
+    }
+    monkeypatch.setattr(runner, "get_run", lambda tid: snap)
+
+    g = graphview.build_run_graph("prcomment-42")
+    ids = {n["id"] for n in g["nodes"]}
+    assert "pr-responder" in ids
+    assert "START" not in ids                      # comment runs have no DAG
+    assert g["executed"] == [{"step": 0, "node": "pr-responder", "iteration": 1}]
+    assert g["tool_calls"]["pr-responder"]
+    assert g["run"]["kind"] == "answer"

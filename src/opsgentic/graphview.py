@@ -150,6 +150,8 @@ def build_run_graph(thread_id: str) -> dict:
             n["status"] = "current" if n["id"] in nxt else ("ran" if n["id"] in ran else "pending")
 
     state = snap.get("state") or {}
+    # Only the context phase (rca node) records a tool-call audit trail in state today;
+    # the action node's remediator calls are not persisted, so the action node shows none.
     tool_calls = (state.get("context_data") or {}).get("tool_calls") or []
     graph["executed"] = steps
     graph["tool_calls"] = {"rca": tool_calls} if tool_calls else {}

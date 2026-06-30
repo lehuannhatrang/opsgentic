@@ -11,7 +11,9 @@ AGENT_TOOLS: dict[str, set[str]] = {
     "rca": set(),            # reasons over context_data; no direct tools
     "resolver": set(),       # LLM picks from precomputed candidates; no direct tools
     "validation": set(),     # deterministic skill registry; no LLM/MCP
-    "remediation": {"kubernetes", "github", "prometheus"},  # used by graphview; action_node goes via remediator.py
+    # Topology only: remediator.py loads all configured servers via load_connections(),
+    # so a new MCP server must also be added here to appear under the action node.
+    "remediation": {"kubernetes", "github", "prometheus"},
     "pr-responder": {"kubernetes", "prometheus", "github"},
 }
 
