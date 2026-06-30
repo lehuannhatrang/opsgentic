@@ -40,6 +40,19 @@
   .modal-box { width:min(760px,94vw); max-height:86vh; overflow:auto; }
   .modal-box .panel { margin:0; }
   .modal-x { position:absolute; top:12px; right:16px; width:32px; height:32px; border-radius:6px; background:var(--panel); color:var(--fg); border:1px solid var(--line); cursor:pointer; font-size:15px; z-index:51; }
+  #cy { height:calc(100vh - 250px); min-height:480px; background:#0d1117; border:1px solid var(--line); border-radius:8px; }
+  #cy.cy-full { position:fixed; inset:0; height:100vh; width:100vw; z-index:60; border-radius:0; border:none; }
+  /* Give the graph tab the full window width (other tabs stay narrow). */
+  body:has(#tab-graph:not(.hide)) main { max-width:1500px; }
+  .g-toolbar { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .g-toolbar .seg button { background:#0d1117; color:var(--mut); border:1px solid var(--line); padding:6px 12px; cursor:pointer; }
+  .g-toolbar .seg button.on { background:var(--acc); color:#fff; border-color:var(--acc); }
+  .g-toolbar select { width:auto; min-width:240px; }
+  .g-legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--mut); margin-top:8px; }
+  .g-legend span b { color:var(--fg); }
+  .g-controls { display:flex; gap:20px; flex-wrap:wrap; margin-top:12px; }
+  .g-controls label { display:inline-flex; align-items:center; gap:7px; margin:0; color:var(--fg); font-size:13px; cursor:pointer; }
+  .g-controls input[type=checkbox] { width:16px; height:16px; margin:0; cursor:pointer; accent-color:var(--acc); }
 </style>
 </head>
 <body>
@@ -47,6 +60,7 @@
   <b>🤖 OpsGentic Console</b>
   <nav>
     <button data-tab="runs" class="active">Runs</button>
+    <button data-tab="graph">Graph</button>
     <button data-tab="chat">Chat</button>
     <button data-tab="skills">Skills</button>
     <button data-tab="config">Config</button>
@@ -60,6 +74,33 @@
       <div class="mut" style="font-size:12px">Auto-refreshing every 5s</div>
       <table style="margin-top:10px"><thead><tr><th>Status</th><th>Alert</th><th>Service</th><th>Repo</th><th>Src</th><th>When</th><th>PR</th></tr></thead>
       <tbody id="r-rows"><tr><td colspan="7" class="mut">Loading…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section id="tab-graph" class="hide">
+    <div class="panel">
+      <div class="g-toolbar">
+        <div class="seg">
+          <button id="g-mode-system" class="on">System</button>
+          <button id="g-mode-run">Run</button>
+        </div>
+        <select id="g-run-sel" class="hide"></select>
+        <span class="sp" style="flex:1"></span>
+        <button class="act" id="g-fit">Fit</button>
+        <button class="act" id="g-full">Fullscreen</button>
+        <span class="mut" id="g-status"></span>
+      </div>
+      <div id="cy"></div>
+      <div class="g-controls">
+        <label><input type="checkbox" id="g-pr-cb"> PR Responder only</label>
+        <label><input type="checkbox" id="g-skill-cb"> Show skill edges</label>
+        <label><input type="checkbox" id="g-mcp-cb"> Show MCP edges</label>
+      </div>
+      <div class="g-legend">
+        <span><b>▭</b> agent</span><span><b>◉</b> MCP server</span>
+        <span><b>▰</b> skill</span><span><b>⬡</b> memory</span>
+        <span><b>– –</b> conditional edge</span>
+      </div>
     </div>
   </section>
 
@@ -109,6 +150,7 @@
   <button class="modal-x" id="modal-close" title="Close (Esc)">✕</button>
   <div class="modal-box" id="modal-body"></div>
 </div>
+<script src="/vendor/cytoscape.min.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const j = async (m, u, b) => { const r = await fetch(u, {method:m, headers:{'content-type':'application/json'}, body:b?JSON.stringify(b):undefined}); const t = await r.text(); let d; try{d=JSON.parse(t)}catch{d=t} if(!r.ok) throw new Error((d&&d.error)||t||r.status); return d; };
@@ -130,11 +172,13 @@ document.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && !$('#modal').c
 // tabs
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
-  ['chat','runs','skills','config'].forEach(t=>$('#tab-'+t).classList.toggle('hide', t!==b.dataset.tab));
+  ['chat','runs','skills','config','graph'].forEach(t=>$('#tab-'+t).classList.toggle('hide', t!==b.dataset.tab));
   stopRunsAuto();
+  clearInterval(gRunTimer);
   if(b.dataset.tab==='runs') startRunsAuto();
   if(b.dataset.tab==='skills') loadSkills();
   if(b.dataset.tab==='config') loadConfig();
+  if(b.dataset.tab==='graph') openGraphTab();
 });
 
 // ---- run card + polling ----
@@ -179,7 +223,7 @@ function renderRun(el, r){
     + (st.hypothesis ? '<label>Hypothesis</label><pre>' + esc(st.hypothesis) + '</pre>' : '')
     + (plan.summary ? '<label>Plan</label><div class="mut">' + esc(plan.summary) + ' — <code>' + esc(plan.file_path || '') + '</code> @ ' + esc(plan.target_repo || '') + ' (risk: ' + esc(plan.risk || '?') + ')</div>' : '')
     + toolsHtml
-    // Dòng đã được sửa:
+    // Render stub PR URLs as plain text; real URLs as links.
     + (pr ? '<p>PR: ' + (stub ? '<span class="mut">' + esc(pr) + '</span>' : '<a href="' + esc(pr) + '" target="_blank">' + esc(pr) + '</a>') + '</p>' : '')
     + (r.error ? '<pre style="color:var(--err)">' + esc(r.error) + '</pre>' : '')
     + '<div>' + ctrl + '</div></div>';
@@ -257,6 +301,259 @@ $('#sec-save').onclick=async()=>{
   if(!Object.keys(data).length){ toast('nothing to set'); return; }
   try{ await j('PUT','/api/secrets',{data}); toast('keys updated + restart'); loadConfig(); }catch(e){ toast(e.message,true); }
 };
+
+// ---- graph visualize ----
+let CY=null, GMODE='system', GRUN=null, gRunTimer=null, GSYS=null, GVIEW=null;
+// PR_ONLY: false -> flow graph (pr-responder hidden); true -> only the PR Responder subgraph.
+// EDGE_SKILL/EDGE_MCP: show per-agent skill/MCP edges; off (default) collapses them to one
+// edge from the Agents group box to the Skills / MCP servers group box.
+let PR_ONLY=false, EDGE_SKILL=false, EDGE_MCP=false;
+const SERVER_COLORS={kubernetes:'#1f6feb',prometheus:'#e6522c',github:'#6e40c9'};
+// Layout: a left-to-right flow backbone, with skills above and MCP servers/memory below,
+// each category wrapped in a compound "group" box. Positions are computed (preset layout)
+// so the grouping is deterministic and the pipeline order stays readable.
+const FLOW_ORDER=['rca','resolve_target','validation','action','END'];
+const COLW=240, AGENT_Y=0, SKILL_Y=-250, SERVER_Y=280, ZIG=70;
+const GROUP_OF={agent:'grp:agents',endpoint:'grp:agents',trigger:'grp:trigger',skill:'grp:skills',server:'grp:mcp',tool:'grp:mcp',memory:'grp:memory'};
+const GROUP_LABEL={'grp:trigger':'Trigger / Hook','grp:agents':'Agents & flow','grp:skills':'Skills','grp:mcp':'MCP servers','grp:memory':'Memory'};
+function cyStyle(){ return [
+  { selector:'node', style:{ 'label':'data(label)','color':'#f3f6fb','font-size':15,'font-weight':'bold',
+      'text-valign':'center','text-halign':'center','text-wrap':'wrap','text-max-width':140 } },
+  { selector:'node[isGroup]', style:{ 'shape':'round-rectangle','background-color':'#7f8ba0',
+      'background-opacity':0.10,'border-width':2,'border-color':'#5b6880',
+      'label':'data(label)','text-valign':'top','text-halign':'center','text-margin-y':-8,
+      'color':'#dbe3ef','font-size':20,'font-weight':'bold','padding':30 } },
+  { selector:'node[type="agent"]', style:{ 'shape':'round-rectangle','background-color':'#243650',
+      'border-color':'#6aa3ff','border-width':3,'width':156,'height':56,'font-size':15 } },
+  { selector:'node[group="webhook"]', style:{ 'background-color':'#3a2f14','border-color':'#e3a93a','border-style':'dashed' } },
+  { selector:'node[type="trigger"]', style:{ 'shape':'round-rectangle','background-color':'#10323d',
+      'border-color':'#3bc0dd','border-width':2.5,'width':140,'height':48,'color':'#9fe6f4' } },
+  { selector:'node[type="endpoint"]', style:{ 'shape':'round-rectangle','background-color':'#3b4660',
+      'border-width':0,'width':86,'height':46,'color':'#dbe3ef' } },
+  { selector:'node[type="server"]', style:{ 'shape':'round-rectangle','background-color':'data(color)',
+      'border-width':0,'width':140,'height':46,'color':'#fff','font-size':15 } },
+  { selector:'node[type="skill"]', style:{ 'shape':'round-rectangle','background-color':'#42495a',
+      'border-width':0,'width':118,'height':40,'font-size':13,'color':'#eef2f8' } },
+  { selector:'node[type="memory"]', style:{ 'shape':'barrel','background-color':'#16401f',
+      'border-color':'#46d36a','border-width':3,'width':140,'height':54,'color':'#8df0a8','font-size':15 } },
+  { selector:'node[type="tool"]', style:{ 'shape':'round-rectangle','background-color':'#10161f',
+      'border-color':'#4a566b','border-width':1.5,'width':128,'height':32,'font-size':11,'font-weight':'normal','color':'#c4cedd' } },
+  { selector:'edge', style:{ 'width':3,'line-color':'#9aa6ba','target-arrow-color':'#9aa6ba',
+      'target-arrow-shape':'triangle','arrow-scale':1.4,'curve-style':'bezier','opacity':1 } },
+  { selector:'edge[kind="flow"]', style:{ 'line-color':'#5aa0ff','target-arrow-color':'#5aa0ff','width':5 } },
+  { selector:'edge[conditional="yes"]', style:{ 'line-style':'dashed' } },
+  { selector:'edge[kind="has-skill"]', style:{ 'line-color':'#c4abf0','target-arrow-shape':'none','line-style':'dotted','width':3 } },
+  { selector:'edge[kind="writes-memory"]', style:{ 'line-color':'#52d873','target-arrow-color':'#52d873','line-style':'dashed','width':3.5 } },
+  { selector:'edge[kind="uses-tool"]', style:{ 'line-color':'#b8c2d2','target-arrow-color':'#b8c2d2','width':3 } },
+  // run-overlay states
+  { selector:'node.ran', style:{ 'border-color':'#46d36a','border-width':5 } },
+  { selector:'node.current', style:{ 'border-color':'#e3a93a','border-width':5 } },
+  { selector:'node.dimmed', style:{ 'opacity':0.4 } },
+  { selector:'node.badge', style:{ 'label':'data(blabel)' } },
+]; }
+
+function computePositions(g){
+  const pos={}; const nodes=g.nodes||[];
+  // Flow backbone, zig-zagged so the conditional edges (validation -> rca/action/END) read clearly.
+  FLOW_ORDER.forEach((id,i)=>{ if(nodes.some(n=>n.id===id)) pos[id]={x:i*COLW, y:AGENT_Y+((i%2)?ZIG:-ZIG)}; });
+  const maxX=(FLOW_ORDER.length-1)*COLW, span=maxX||COLW;
+  // Triggers feed rca from the left.
+  const trig=nodes.filter(n=>n.type==='trigger');
+  trig.forEach((n,i)=>{ pos[n.id]={ x:-COLW, y: AGENT_Y + (trig.length>1 ? (i-(trig.length-1)/2)*130 : 0) }; });
+  // Off-graph agents (pr-responder) to the right.
+  nodes.filter(n=>n.type==='agent' && n.group==='webhook').forEach((n,i)=>{ pos[n.id]={x:maxX+COLW*(i+1),y:AGENT_Y+130}; });
+  const skills=nodes.filter(n=>n.type==='skill');
+  skills.forEach((n,i)=>{ pos[n.id]={x: skills.length>1 ? i*span/(skills.length-1) : span/2, y:SKILL_Y}; });
+  const servers=nodes.filter(n=>n.type==='server');
+  servers.forEach((n,i)=>{ pos[n.id]={x: servers.length>1 ? i*(span*0.7)/(servers.length-1) : span*0.35, y:SERVER_Y}; });
+  const mem=nodes.find(n=>n.type==='memory'); if(mem) pos[mem.id]={x:maxX,y:SERVER_Y};
+  return pos;
+}
+
+// Choose what the graph shows. Two modes (no-op on a comment-run graph — it is already
+// entirely about pr-responder):
+//   PR_ONLY=false -> the flow graph with the off-graph pr-responder (and its solo skills) removed.
+//   PR_ONLY=true  -> ONLY the pr-responder subgraph: itself, the skills/servers it uses, and a
+//                    'Repo Webhook' trigger feeding it (flow agents/triggers/memory dropped).
+function filterGraph(g){
+  if(!(g.nodes||[]).some(n=>n.id==='rca')) return g;   // comment-run graph: leave as-is
+  if(!PR_ONLY){
+    const edges=(g.edges||[]).filter(e=>e.source!=='pr-responder' && e.target!=='pr-responder');
+    const ref=new Set(); edges.forEach(e=>{ ref.add(e.source); ref.add(e.target); });
+    const nodes=(g.nodes||[]).filter(n=>
+      n.id!=='pr-responder' && (n.type!=='skill' || ref.has(n.id)));
+    return Object.assign({}, g, { nodes, edges });
+  }
+  const pr='pr-responder';
+  const skillEdges=(g.edges||[]).filter(e=>e.kind==='has-skill' && e.target===pr);
+  const toolEdges=(g.edges||[]).filter(e=>e.kind==='uses-tool' && e.source===pr);
+  const keep=new Set([pr]); skillEdges.forEach(e=>keep.add(e.source)); toolEdges.forEach(e=>keep.add(e.target));
+  const nodes=(g.nodes||[]).filter(n=>keep.has(n.id))
+    .concat([{ id:'trigger:repo', type:'trigger', label:'issue_comment', group:'trigger' }]);
+  const edges=skillEdges.concat(toolEdges)
+    .concat([{ source:'trigger:repo', target:pr, kind:'flow', conditional:false }]);
+  return Object.assign({}, g, { nodes, edges });
+}
+
+function graphToElements(g){
+  const els=[]; const pos=computePositions(g); const groups=new Set();
+  const ids=new Set((g.nodes||[]).map(n=>n.id));
+  (g.nodes||[]).forEach(n=>{ const grp=GROUP_OF[n.type]; if(grp) groups.add(grp); });
+  groups.forEach(grp=>{
+    const label = (grp==='grp:trigger' && PR_ONLY) ? 'Repo Webhook' : (GROUP_LABEL[grp]||grp);
+    els.push({ data:{ id:grp, label, isGroup:1 } });
+  });
+  (g.nodes||[]).forEach(n=>{
+    const d={ id:n.id, label:n.label, type:n.type, group:n.group||'', agents:n.agents||[],
+              description:n.description||'', body:n.body||'', parent:GROUP_OF[n.type] };
+    if(n.type==='server') d.color=SERVER_COLORS[n.label]||'#3a3f4b';
+    const p=pos[n.id];
+    els.push(p ? { data:d, position:{x:p.x,y:p.y} } : { data:d });
+  });
+  // Collapse detail edges to single group->group edges unless their toggle is on.
+  const once={};
+  const collapse=(key, src, tgt, kind)=>{ if(!once[key] && groups.has(src) && groups.has(tgt)){
+    els.push({ data:{ id:key, source:src, target:tgt, kind, conditional:'no' } }); once[key]=1; } };
+  (g.edges||[]).forEach(e=>{
+    if(e.kind==='writes-memory'){ // memory is always a single edge from the Agents box
+      if(!once['mem'] && groups.has('grp:agents') && ids.has(e.target)){
+        els.push({ data:{ id:'grp:agents->memory', source:'grp:agents', target:e.target,
+          kind:'writes-memory', conditional:'no' } }); once['mem']=1; }
+      return;
+    }
+    if(e.kind==='has-skill' && !EDGE_SKILL){ collapse('grp:agents->grp:skills','grp:agents','grp:skills','has-skill'); return; }
+    // agent -> server (not the lazily-added server -> tool edges)
+    if(e.kind==='uses-tool' && !EDGE_MCP && !String(e.source).startsWith('server:')){
+      collapse('grp:agents->grp:mcp','grp:agents','grp:mcp','uses-tool'); return; }
+    els.push({ data:{ id:e.source+'->'+e.target+':'+e.kind, source:e.source, target:e.target,
+      kind:e.kind, conditional:e.conditional?'yes':'no' } });
+  });
+  return els;
+}
+
+function renderGraph(g){
+  GVIEW=g;   // the filtered graph currently shown (has per-agent edges for the detail panel)
+  if(CY) CY.destroy();
+  CY = cytoscape({ container:$('#cy'), elements:graphToElements(g), style:cyStyle(),
+    layout:{ name:'preset', fit:true, padding:30 }, wheelSensitivity:0.2 });
+  CY.on('tap','node[type="server"]', (evt)=>{ expandServerTools(evt.target); });
+  // Open detail only for real leaf nodes (skip the server -> expand-only, and group boxes).
+  CY.on('tap','node', (evt)=>{ const t=evt.target.data('type'); if(t && t!=='server') showNodeDetail(evt.target.id()); });
+  return CY;
+}
+
+async function openGraphTab(){
+  if(GMODE==='system') loadSystemGraph(); else loadRunPicker();
+}
+async function loadSystemGraph(){
+  $('#g-status').textContent='loading…';
+  try{ const g=await j('GET','/api/graph'); GSYS=g; renderGraph(filterGraph(g)); $('#g-status').textContent=''; }
+  catch(e){ $('#g-status').textContent=e.message; }
+}
+async function expandServerTools(node){
+  const id=node.id(); if(node.data('expanded')) return; node.data('expanded',true);
+  const server=node.data('label');
+  $('#g-status').textContent='listing '+server+' tools…';
+  try{
+    const r=await j('GET','/api/graph/tools/'+encodeURIComponent(server));
+    if(r.error && !(r.tools||[]).length){ $('#g-status').textContent=server+': '+r.error; return; }
+    const base=node.position();
+    (r.tools||[]).forEach((t,k)=>{
+      const tid='tool:'+server+':'+t;
+      CY.add([{ data:{ id:tid, label:t, type:'tool', group:server, parent:'grp:mcp' },
+                position:{ x: base.x, y: base.y + 80 + k*34 } },
+              { data:{ id:tid+'-e', source:id, target:tid, kind:'uses-tool', conditional:'no' } }]);
+    });
+    CY.fit(undefined,30);
+    $('#g-status').textContent='';
+  }catch(e){ $('#g-status').textContent=e.message; }
+}
+function showNodeDetail(id){
+  const n=CY.getElementById(id); if(!n||!n.length) return;
+  clearInterval(pollTimer);   // a run-detail modal may have left this ticking
+  const d=n.data(); const tc=(GRUN&&GRUN.tool_calls&&GRUN.tool_calls[id])||[];
+  let body='<div class="panel"><div><b>'+esc(d.label)+'</b> <span class="grp">'+esc(d.type)+'</span></div>';
+  if(d.agents && d.agents.length) body+='<div class="mut" style="margin:4px 0">agents: '+esc(d.agents.join(', '))+'</div>';
+  if(d.type==='agent' && GVIEW){
+    const sk=(GVIEW.edges||[]).filter(e=>e.kind==='has-skill' && e.target===id).map(e=>String(e.source).replace('skill:',''));
+    const mc=(GVIEW.edges||[]).filter(e=>e.kind==='uses-tool' && e.source===id).map(e=>String(e.target).replace('server:',''));
+    body+='<div style="margin:4px 0">Skills: '+(sk.length?sk.map(esc).join(', '):'<span class="mut">none</span>')+'</div>';
+    body+='<div style="margin:4px 0">MCP servers: '+(mc.length?mc.map(esc).join(', '):'<span class="mut">none</span>')+'</div>';
+  }
+  if(d.type==='skill'){
+    if(d.description) body+='<div class="mut" style="margin:4px 0">'+esc(d.description)+'</div>';
+    body+='<label>Skill instructions</label><pre>'+esc(d.body||'(no content)')+'</pre>';
+  }
+  if(GRUN && GRUN.run && (id==='rca')) body+=(GRUN.run.hypothesis?'<label>Hypothesis</label><pre>'+esc(GRUN.run.hypothesis)+'</pre>':'');
+  if(GRUN && GRUN.run && (id==='action')){ const p=GRUN.run.remediation_plan||{};
+    if(p.summary) body+='<label>Plan</label><div class="mut">'+esc(p.summary)+' — <code>'+esc(p.file_path||'')+'</code></div>'; }
+  body+=toolCallsHtml(tc);
+  if(GRUN && d.type==='agent' && d.group==='flow' && !tc.length)
+    body+='<div class="mut" style="margin-top:8px">No tool calls recorded for this node in this run.</div>';
+  body+='</div>';
+  $('#modal-body').innerHTML=body; $('#modal').classList.remove('hide');
+}
+
+$('#g-fit').onclick=()=>{ if(CY) CY.fit(undefined,30); };
+function toggleGraphFull(force){
+  const cy=$('#cy'); const on=cy.classList.toggle('cy-full', force);
+  $('#g-full').textContent = on ? 'Exit fullscreen' : 'Fullscreen';
+  if(CY){ CY.resize(); CY.fit(undefined,30); }
+}
+$('#g-full').onclick=()=>toggleGraphFull();
+function redrawGraph(){
+  if(GMODE==='system'){ if(GSYS) renderGraph(filterGraph(GSYS)); }
+  else if(GRUN){ applyRunOverlay(GRUN); }
+}
+$('#g-pr-cb').onchange=(e)=>{ PR_ONLY=e.target.checked; redrawGraph(); };
+$('#g-skill-cb').onchange=(e)=>{ EDGE_SKILL=e.target.checked; redrawGraph(); };
+$('#g-mcp-cb').onchange=(e)=>{ EDGE_MCP=e.target.checked; redrawGraph(); };
+document.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && $('#cy').classList.contains('cy-full')) toggleGraphFull(false); });
+$('#g-mode-system').onclick=()=>{ GMODE='system'; GRUN=null; clearInterval(gRunTimer);
+  $('#g-mode-system').classList.add('on'); $('#g-mode-run').classList.remove('on');
+  $('#g-run-sel').classList.add('hide'); loadSystemGraph(); };
+$('#g-mode-run').onclick=()=>{ GMODE='run';
+  $('#g-mode-run').classList.add('on'); $('#g-mode-system').classList.remove('on');
+  $('#g-run-sel').classList.remove('hide'); loadRunPicker(); };
+
+async function loadRunPicker(){
+  try{
+    const rows=await j('GET','/api/runs'); const sel=$('#g-run-sel');
+    const prev=sel.value;   // preserve the user's current selection across re-entry
+    sel.innerHTML='<option value="">— pick a run —</option>'+rows.map(r=>{
+      const s=r.summary||{}; const lbl=(s.title||r.thread_id)+' · '+r.status;
+      return '<option value="'+esc(r.thread_id)+'">'+esc(lbl)+'</option>'; }).join('');
+    sel.onchange=()=>{ if(sel.value) loadRunGraph(sel.value); };
+    const keep=prev && rows.some(r=>r.thread_id===prev) ? prev : (rows[0] && rows[0].thread_id);
+    if(keep){ sel.value=keep; if(!GRUN || prev!==keep) loadRunGraph(keep); }
+  }catch(e){ $('#g-status').textContent=e.message; }
+}
+function applyRunOverlay(g){
+  const fg=filterGraph(g);
+  renderGraph(fg);
+  CY.nodes().forEach(n=>{
+    const id=n.id(), d=n.data();
+    if(d.type==='agent' && d.group==='flow'){
+      const st = (fg.nodes.find(x=>x.id===id)||{}).status;
+      if(st==='ran') n.addClass('ran'); else if(st==='current') n.addClass('current');
+      else if(st==='pending') n.addClass('dimmed');
+    }
+    const tc=(g.tool_calls||{})[id]||[];
+    if(tc.length){ n.data('blabel', d.label+'  ['+tc.length+(tc.length===1?' tool]':' tools]')); n.addClass('badge'); }
+  });
+}
+async function loadRunGraph(id){
+  $('#g-status').textContent='loading run…';
+  try{
+    const g=await j('GET','/api/runs/'+encodeURIComponent(id)+'/graph');
+    GRUN=g; applyRunOverlay(g);
+    $('#g-status').textContent=(g.run&&g.run.status?('status: '+g.run.status):'');
+    clearInterval(gRunTimer);
+    if(g.run && !['applied','failed','escalated','rejected','completed'].includes(g.run.status)){
+      gRunTimer=setInterval(()=>{ if(GMODE==='run') loadRunGraph(id); }, 5000);
+    }
+  }catch(e){ $('#g-status').textContent=e.message; }
+}
 </script>
 </body>
 </html>

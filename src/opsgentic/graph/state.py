@@ -42,5 +42,6 @@ class MachineState(TypedDict, total=False):
     remediation_plan: Optional[RemediationPlan]  # Remediation plan
     execution_status: ExecutionStatus
     pr_url: Optional[str]
+    remediation_tool_calls: list                 # Action-agent MCP tool audit trail (for the run graph)
     rca_attempts: int                            # Self-heal loop counter
     messages: Annotated[list[AnyMessage], add_messages]

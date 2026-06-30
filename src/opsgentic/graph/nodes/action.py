@@ -29,6 +29,7 @@ def action_node(state: MachineState, config: RunnableConfig) -> dict:
     run_id = (config or {}).get("configurable", {}).get("thread_id", "unknown")
     alert = state.get("alert_payload")
     workload = state.get("service_ref")
+    tool_calls: list = []
     try:
         existing = find_open_remediation_pr(plan, alert)
         if existing:
@@ -45,7 +46,7 @@ def action_node(state: MachineState, config: RunnableConfig) -> dict:
         else:
             # First fire: a read-only agent reads the repo (via MCP) and proposes surgical field
             # edits; opsgentic applies them to the real file. No edits -> a proposal PR.
-            edits = generate_edits(state)
+            edits, tool_calls = generate_edits(state)
             pr_url = create_pull_request(
                 plan,
                 run_id=run_id,
@@ -66,5 +67,6 @@ def action_node(state: MachineState, config: RunnableConfig) -> dict:
     return {
         "pr_url": pr_url,
         "execution_status": "applied",
+        "remediation_tool_calls": tool_calls,
         "messages": [AIMessage(content=msg)],
     }

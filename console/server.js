@@ -73,6 +73,11 @@ app.get('/api/runs/:id', (req, res) => proxy(res, 'GET', `/runs/${encodeURICompo
 app.post('/api/runs/:id/approve', (req, res) => proxy(res, 'POST', `/runs/${encodeURIComponent(req.params.id)}/approve`));
 app.post('/api/runs/:id/reject', (req, res) => proxy(res, 'POST', `/runs/${encodeURIComponent(req.params.id)}/reject`));
 
+// graph visualize (system topology + per-run trace) -> opsgentic
+app.get('/api/graph', (_req, res) => proxy(res, 'GET', '/graph'));
+app.get('/api/graph/tools/:server', (req, res) => proxy(res, 'GET', `/graph/tools/${encodeURIComponent(req.params.server)}`));
+app.get('/api/runs/:id/graph', (req, res) => proxy(res, 'GET', `/runs/${encodeURIComponent(req.params.id)}/graph`));
+
 // skills (opsgentic-skills ConfigMap) ------------------------------------------------------
 app.get('/api/skills', async (_req, res) => {
   try {
