@@ -88,3 +88,10 @@ def test_executed_steps_ignores_non_node_writes():
     ]
     steps = graphview.executed_steps(history)
     assert [s["node"] for s in steps] == ["action"]
+
+
+def test_list_server_tools_unknown_server_returns_empty():
+    out = graphview.list_server_tools("does-not-exist")
+    assert out["server"] == "does-not-exist"
+    assert out["tools"] == []
+    assert out["error"]

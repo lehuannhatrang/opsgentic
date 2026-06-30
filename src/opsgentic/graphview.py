@@ -163,3 +163,23 @@ def build_run_graph(thread_id: str) -> dict:
         "error": snap.get("error"),
     }
     return graph
+
+
+def list_server_tools(server: str) -> dict:
+    """Connect to one configured MCP server and return its real tool names. Returns
+    an empty list + error string (never raises) so the UI degrades gracefully when a
+    server is not deployed."""
+    import asyncio
+
+    from opsgentic.mcp.loader import explain_exception
+
+    conns = load_connections(include={server})
+    if server not in conns:
+        return {"server": server, "tools": [], "error": "not configured"}
+    try:
+        from opsgentic.mcp.diagnose import _probe
+
+        tools = asyncio.run(_probe(server, conns[server]))
+        return {"server": server, "tools": sorted(tools), "error": None}
+    except Exception as exc:
+        return {"server": server, "tools": [], "error": explain_exception(exc)}

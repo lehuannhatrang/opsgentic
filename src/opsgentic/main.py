@@ -118,6 +118,27 @@ def get_run(thread_id: str) -> dict:
     return runner.get_run(thread_id)
 
 
+@app.get("/graph")
+def system_graph() -> dict:
+    from opsgentic import graphview
+
+    return graphview.build_system_graph()
+
+
+@app.get("/graph/tools/{server}")
+def graph_server_tools(server: str) -> dict:
+    from opsgentic import graphview
+
+    return graphview.list_server_tools(server)
+
+
+@app.get("/runs/{thread_id}/graph")
+def run_graph(thread_id: str) -> dict:
+    from opsgentic import graphview
+
+    return graphview.build_run_graph(thread_id)
+
+
 @app.post("/runs/{thread_id}/approve", status_code=202)
 async def approve_run(thread_id: str) -> dict:
     return await runner.enqueue_resume(thread_id, "approve")
