@@ -40,7 +40,10 @@
   .modal-box { width:min(760px,94vw); max-height:86vh; overflow:auto; }
   .modal-box .panel { margin:0; }
   .modal-x { position:absolute; top:12px; right:16px; width:32px; height:32px; border-radius:6px; background:var(--panel); color:var(--fg); border:1px solid var(--line); cursor:pointer; font-size:15px; z-index:51; }
-  #cy { height:560px; background:#0d1117; border:1px solid var(--line); border-radius:8px; }
+  #cy { height:calc(100vh - 250px); min-height:480px; background:#0d1117; border:1px solid var(--line); border-radius:8px; }
+  #cy.cy-full { position:fixed; inset:0; height:100vh; width:100vw; z-index:60; border-radius:0; border:none; }
+  /* Give the graph tab the full window width (other tabs stay narrow). */
+  body:has(#tab-graph:not(.hide)) main { max-width:1500px; }
   .g-toolbar { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
   .g-toolbar .seg button { background:#0d1117; color:var(--mut); border:1px solid var(--line); padding:6px 12px; cursor:pointer; }
   .g-toolbar .seg button.on { background:var(--acc); color:#fff; border-color:var(--acc); }
@@ -81,6 +84,7 @@
         <select id="g-run-sel" class="hide"></select>
         <span class="sp" style="flex:1"></span>
         <button class="act" id="g-fit">Fit</button>
+        <button class="act" id="g-full">Fullscreen</button>
         <span class="mut" id="g-status"></span>
       </div>
       <div id="cy"></div>
@@ -293,42 +297,69 @@ $('#sec-save').onclick=async()=>{
 // ---- graph visualize ----
 let CY=null, GMODE='system', GRUN=null, gRunTimer=null;
 const SERVER_COLORS={kubernetes:'#1f6feb',prometheus:'#e6522c',github:'#6e40c9'};
+// Layout: a left-to-right flow backbone, with skills above and MCP servers/memory below,
+// each category wrapped in a compound "group" box. Positions are computed (preset layout)
+// so the grouping is deterministic and the pipeline order stays readable.
+const FLOW_ORDER=['START','rca','resolve_target','validation','action','END'];
+const COLW=210, AGENT_Y=0, SKILL_Y=-220, SERVER_Y=250;
+const GROUP_OF={agent:'grp:agents',endpoint:'grp:agents',skill:'grp:skills',server:'grp:mcp',tool:'grp:mcp',memory:'grp:memory'};
+const GROUP_LABEL={'grp:agents':'Agents & flow','grp:skills':'Skills','grp:mcp':'MCP servers','grp:memory':'Memory'};
 function cyStyle(){ return [
-  { selector:'node', style:{ 'label':'data(label)','color':'#e6edf3','font-size':11,
-      'text-valign':'center','text-halign':'center','text-wrap':'wrap','text-max-width':110 } },
+  { selector:'node', style:{ 'label':'data(label)','color':'#e6edf3','font-size':12,
+      'text-valign':'center','text-halign':'center','text-wrap':'wrap','text-max-width':120 } },
+  { selector:'node[isGroup]', style:{ 'shape':'round-rectangle','background-color':'#8b98a9',
+      'background-opacity':0.06,'border-width':1,'border-color':'#3a4456','border-style':'dashed',
+      'label':'data(label)','text-valign':'top','text-halign':'center','text-margin-y':-6,
+      'color':'#aeb9c8','font-size':13,'font-weight':'bold','padding':24 } },
   { selector:'node[type="agent"]', style:{ 'shape':'round-rectangle','background-color':'#1a2230',
-      'border-color':'#4c8eff','border-width':2,'width':130,'height':46,'text-valign':'center' } },
+      'border-color':'#4c8eff','border-width':2,'width':140,'height':50,'text-valign':'center' } },
   { selector:'node[group="webhook"]', style:{ 'border-color':'#d29922','border-style':'dashed' } },
   { selector:'node[type="endpoint"]', style:{ 'shape':'ellipse','background-color':'#2b3648',
-      'border-width':0,'width':54,'height':54,'color':'#8b98a9' } },
+      'border-width':0,'width':56,'height':56,'color':'#8b98a9' } },
   { selector:'node[type="server"]', style:{ 'shape':'round-rectangle','background-color':'data(color)',
-      'border-width':0,'width':120,'height':38,'color':'#fff' } },
+      'border-width':0,'width':128,'height':42,'color':'#fff','font-weight':'bold' } },
   { selector:'node[type="skill"]', style:{ 'shape':'round-rectangle','background-color':'#30363d',
-      'border-width':0,'width':96,'height':30,'font-size':10,'color':'#c9d1d9' } },
+      'border-width':0,'width':104,'height':34,'font-size':11,'color':'#c9d1d9' } },
   { selector:'node[type="memory"]', style:{ 'shape':'barrel','background-color':'#16301c',
-      'border-color':'#3fb950','border-width':2,'width':120,'height':44,'color':'#3fb950' } },
+      'border-color':'#3fb950','border-width':2,'width':128,'height':48,'color':'#3fb950' } },
   { selector:'node[type="tool"]', style:{ 'shape':'round-rectangle','background-color':'#0d1117',
-      'border-color':'#2b3648','border-width':1,'width':110,'height':26,'font-size':9,'color':'#8b98a9' } },
-  { selector:'edge', style:{ 'width':1.5,'line-color':'#2b3648','target-arrow-color':'#2b3648',
-      'target-arrow-shape':'triangle','curve-style':'bezier' } },
-  { selector:'edge[kind="flow"]', style:{ 'line-color':'#4c8eff','target-arrow-color':'#4c8eff','width':2 } },
+      'border-color':'#2b3648','border-width':1,'width':118,'height':28,'font-size':9,'color':'#8b98a9' } },
+  { selector:'edge', style:{ 'width':2.5,'line-color':'#6b7689','target-arrow-color':'#6b7689',
+      'target-arrow-shape':'triangle','arrow-scale':1.2,'curve-style':'bezier','opacity':0.95 } },
+  { selector:'edge[kind="flow"]', style:{ 'line-color':'#4c8eff','target-arrow-color':'#4c8eff','width':4 } },
   { selector:'edge[conditional="yes"]', style:{ 'line-style':'dashed' } },
-  { selector:'edge[kind="has-skill"]', style:{ 'line-color':'#30363d','target-arrow-shape':'none','line-style':'dotted' } },
-  { selector:'edge[kind="writes-memory"]', style:{ 'line-color':'#26402c','target-arrow-color':'#26402c','line-style':'dashed' } },
-  { selector:'edge[kind="uses-tool"]', style:{ 'line-color':'#3a3f4b','target-arrow-color':'#3a3f4b' } },
+  { selector:'edge[kind="has-skill"]', style:{ 'line-color':'#9b7fe0','target-arrow-shape':'none','line-style':'dotted','width':2.5 } },
+  { selector:'edge[kind="writes-memory"]', style:{ 'line-color':'#3fb950','target-arrow-color':'#3fb950','line-style':'dashed','width':2.5 } },
+  { selector:'edge[kind="uses-tool"]', style:{ 'line-color':'#9aa6b6','target-arrow-color':'#9aa6b6','width':2.5 } },
   // run-overlay states
-  { selector:'node.ran', style:{ 'border-color':'#3fb950','border-width':3 } },
-  { selector:'node.current', style:{ 'border-color':'#d29922','border-width':3 } },
+  { selector:'node.ran', style:{ 'border-color':'#3fb950','border-width':4 } },
+  { selector:'node.current', style:{ 'border-color':'#d29922','border-width':4 } },
   { selector:'node.dimmed', style:{ 'opacity':0.35 } },
   { selector:'node.badge', style:{ 'label':'data(blabel)' } },
 ]; }
 
+function computePositions(g){
+  const pos={}; const nodes=g.nodes||[];
+  FLOW_ORDER.forEach((id,i)=>{ if(nodes.some(n=>n.id===id)) pos[id]={x:i*COLW,y:AGENT_Y}; });
+  const maxX=(FLOW_ORDER.length-1)*COLW, span=maxX||COLW;
+  nodes.filter(n=>n.type==='agent' && n.group==='webhook').forEach((n,i)=>{ pos[n.id]={x:maxX+COLW*(i+1),y:AGENT_Y+100}; });
+  const skills=nodes.filter(n=>n.type==='skill');
+  skills.forEach((n,i)=>{ pos[n.id]={x: skills.length>1 ? i*span/(skills.length-1) : span/2, y:SKILL_Y}; });
+  const servers=nodes.filter(n=>n.type==='server');
+  servers.forEach((n,i)=>{ pos[n.id]={x: servers.length>1 ? i*(span*0.7)/(servers.length-1) : span*0.35, y:SERVER_Y}; });
+  const mem=nodes.find(n=>n.type==='memory'); if(mem) pos[mem.id]={x:maxX,y:SERVER_Y};
+  return pos;
+}
+
 function graphToElements(g){
-  const els=[];
+  const els=[]; const pos=computePositions(g); const groups=new Set();
+  (g.nodes||[]).forEach(n=>{ const grp=GROUP_OF[n.type]; if(grp) groups.add(grp); });
+  groups.forEach(grp=>els.push({ data:{ id:grp, label:GROUP_LABEL[grp]||grp, isGroup:1 } }));
   (g.nodes||[]).forEach(n=>{
-    const d={ id:n.id, label:n.label, type:n.type, group:n.group||'', agents:n.agents||[] };
+    const d={ id:n.id, label:n.label, type:n.type, group:n.group||'', agents:n.agents||[], parent:GROUP_OF[n.type] };
     if(n.type==='server') d.color=SERVER_COLORS[n.label]||'#3a3f4b';
-    els.push({ data:d });
+    const p=pos[n.id];
+    els.push(p ? { data:d, position:{x:p.x,y:p.y} } : { data:d });
   });
   (g.edges||[]).forEach(e=>els.push({ data:{
     id:e.source+'->'+e.target+':'+e.kind, source:e.source, target:e.target,
@@ -336,20 +367,13 @@ function graphToElements(g){
   return els;
 }
 
-function gLayout(){
-  // breadthfirst needs a valid root; PR-comment run graphs have no START node.
-  const roots = CY && CY.nodes('[id = "START"]').length ? ['START'] : undefined;
-  return { name:'breadthfirst', directed:true, spacingFactor:1.2, padding:20, roots };
-}
 function renderGraph(g){
   if(CY) CY.destroy();
-  const hasStart=(g.nodes||[]).some(n=>n.id==='START');
   CY = cytoscape({ container:$('#cy'), elements:graphToElements(g), style:cyStyle(),
-    layout:{ name:'breadthfirst', directed:true, spacingFactor:1.2, padding:20,
-      roots:hasStart?['START']:undefined }, wheelSensitivity:0.2 });
+    layout:{ name:'preset', fit:true, padding:30 }, wheelSensitivity:0.2 });
   CY.on('tap','node[type="server"]', (evt)=>{ expandServerTools(evt.target); });
-  // Skip server nodes here so a server tap only expands (both handlers fire otherwise).
-  CY.on('tap','node', (evt)=>{ if(evt.target.data('type')!=='server') showNodeDetail(evt.target.id()); });
+  // Open detail only for real leaf nodes (skip the server -> expand-only, and group boxes).
+  CY.on('tap','node', (evt)=>{ const t=evt.target.data('type'); if(t && t!=='server') showNodeDetail(evt.target.id()); });
   return CY;
 }
 
@@ -368,12 +392,14 @@ async function expandServerTools(node){
   try{
     const r=await j('GET','/api/graph/tools/'+encodeURIComponent(server));
     if(r.error && !(r.tools||[]).length){ $('#g-status').textContent=server+': '+r.error; return; }
-    (r.tools||[]).forEach(t=>{
+    const base=node.position();
+    (r.tools||[]).forEach((t,k)=>{
       const tid='tool:'+server+':'+t;
-      CY.add([{ data:{ id:tid, label:t, type:'tool', group:server } },
+      CY.add([{ data:{ id:tid, label:t, type:'tool', group:server, parent:'grp:mcp' },
+                position:{ x: base.x, y: base.y + 80 + k*34 } },
               { data:{ id:tid+'-e', source:id, target:tid, kind:'uses-tool', conditional:'no' } }]);
     });
-    CY.layout(gLayout()).run();
+    CY.fit(undefined,30);
     $('#g-status').textContent='';
   }catch(e){ $('#g-status').textContent=e.message; }
 }
@@ -391,6 +417,13 @@ function showNodeDetail(id){
 }
 
 $('#g-fit').onclick=()=>{ if(CY) CY.fit(undefined,30); };
+function toggleGraphFull(force){
+  const cy=$('#cy'); const on=cy.classList.toggle('cy-full', force);
+  $('#g-full').textContent = on ? 'Exit fullscreen' : 'Fullscreen';
+  if(CY){ CY.resize(); CY.fit(undefined,30); }
+}
+$('#g-full').onclick=()=>toggleGraphFull();
+document.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && $('#cy').classList.contains('cy-full')) toggleGraphFull(false); });
 $('#g-mode-system').onclick=()=>{ GMODE='system'; GRUN=null; clearInterval(gRunTimer);
   $('#g-mode-system').classList.add('on'); $('#g-mode-run').classList.remove('on');
   $('#g-run-sel').classList.add('hide'); loadSystemGraph(); };
