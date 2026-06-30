@@ -50,6 +50,9 @@
   .g-toolbar select { width:auto; min-width:240px; }
   .g-legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--mut); margin-top:8px; }
   .g-legend span b { color:var(--fg); }
+  .g-controls { display:flex; gap:20px; flex-wrap:wrap; margin-top:12px; }
+  .g-controls label { display:inline-flex; align-items:center; gap:7px; margin:0; color:var(--fg); font-size:13px; cursor:pointer; }
+  .g-controls input[type=checkbox] { width:16px; height:16px; margin:0; cursor:pointer; accent-color:var(--acc); }
 </style>
 </head>
 <body>
@@ -82,13 +85,17 @@
           <button id="g-mode-run">Run</button>
         </div>
         <select id="g-run-sel" class="hide"></select>
-        <div class="seg"><button id="g-pr" class="on">PR responder</button></div>
         <span class="sp" style="flex:1"></span>
         <button class="act" id="g-fit">Fit</button>
         <button class="act" id="g-full">Fullscreen</button>
         <span class="mut" id="g-status"></span>
       </div>
       <div id="cy"></div>
+      <div class="g-controls">
+        <label><input type="checkbox" id="g-pr-cb"> PR Responder only</label>
+        <label><input type="checkbox" id="g-skill-cb"> Show skill edges</label>
+        <label><input type="checkbox" id="g-mcp-cb"> Show MCP edges</label>
+      </div>
       <div class="g-legend">
         <span><b>▭</b> agent</span><span><b>◉</b> MCP server</span>
         <span><b>▰</b> skill</span><span><b>⬡</b> memory</span>
@@ -296,7 +303,11 @@ $('#sec-save').onclick=async()=>{
 };
 
 // ---- graph visualize ----
-let CY=null, GMODE='system', GRUN=null, gRunTimer=null, GSYS=null, SHOW_PR=true;
+let CY=null, GMODE='system', GRUN=null, gRunTimer=null, GSYS=null, GVIEW=null;
+// PR_ONLY: false -> flow graph (pr-responder hidden); true -> only the PR Responder subgraph.
+// EDGE_SKILL/EDGE_MCP: show per-agent skill/MCP edges; off (default) collapses them to one
+// edge from the Agents group box to the Skills / MCP servers group box.
+let PR_ONLY=false, EDGE_SKILL=false, EDGE_MCP=false;
 const SERVER_COLORS={kubernetes:'#1f6feb',prometheus:'#e6522c',github:'#6e40c9'};
 // Layout: a left-to-right flow backbone, with skills above and MCP servers/memory below,
 // each category wrapped in a compound "group" box. Positions are computed (preset layout)
@@ -359,14 +370,28 @@ function computePositions(g){
   return pos;
 }
 
-// Optionally drop the off-graph pr-responder agent (and its edges + skills wired only to it).
-// No-op on a comment-run graph (no flow backbone), which is entirely about pr-responder.
+// Choose what the graph shows. Two modes (no-op on a comment-run graph — it is already
+// entirely about pr-responder):
+//   PR_ONLY=false -> the flow graph with the off-graph pr-responder (and its solo skills) removed.
+//   PR_ONLY=true  -> ONLY the pr-responder subgraph: itself, the skills/servers it uses, and a
+//                    'Repo Webhook' trigger feeding it (flow agents/triggers/memory dropped).
 function filterGraph(g){
-  if(SHOW_PR || !(g.nodes||[]).some(n=>n.id==='rca')) return g;
-  const edges=(g.edges||[]).filter(e=>e.source!=='pr-responder' && e.target!=='pr-responder');
-  const ref=new Set(); edges.forEach(e=>{ ref.add(e.source); ref.add(e.target); });
-  const nodes=(g.nodes||[]).filter(n=>
-    n.id!=='pr-responder' && (n.type!=='skill' || ref.has(n.id)));
+  if(!(g.nodes||[]).some(n=>n.id==='rca')) return g;   // comment-run graph: leave as-is
+  if(!PR_ONLY){
+    const edges=(g.edges||[]).filter(e=>e.source!=='pr-responder' && e.target!=='pr-responder');
+    const ref=new Set(); edges.forEach(e=>{ ref.add(e.source); ref.add(e.target); });
+    const nodes=(g.nodes||[]).filter(n=>
+      n.id!=='pr-responder' && (n.type!=='skill' || ref.has(n.id)));
+    return Object.assign({}, g, { nodes, edges });
+  }
+  const pr='pr-responder';
+  const skillEdges=(g.edges||[]).filter(e=>e.kind==='has-skill' && e.target===pr);
+  const toolEdges=(g.edges||[]).filter(e=>e.kind==='uses-tool' && e.source===pr);
+  const keep=new Set([pr]); skillEdges.forEach(e=>keep.add(e.source)); toolEdges.forEach(e=>keep.add(e.target));
+  const nodes=(g.nodes||[]).filter(n=>keep.has(n.id))
+    .concat([{ id:'trigger:repo', type:'trigger', label:'issue_comment', group:'trigger' }]);
+  const edges=skillEdges.concat(toolEdges)
+    .concat([{ source:'trigger:repo', target:pr, kind:'flow', conditional:false }]);
   return Object.assign({}, g, { nodes, edges });
 }
 
@@ -374,7 +399,10 @@ function graphToElements(g){
   const els=[]; const pos=computePositions(g); const groups=new Set();
   const ids=new Set((g.nodes||[]).map(n=>n.id));
   (g.nodes||[]).forEach(n=>{ const grp=GROUP_OF[n.type]; if(grp) groups.add(grp); });
-  groups.forEach(grp=>els.push({ data:{ id:grp, label:GROUP_LABEL[grp]||grp, isGroup:1 } }));
+  groups.forEach(grp=>{
+    const label = (grp==='grp:trigger' && PR_ONLY) ? 'Repo Webhook' : (GROUP_LABEL[grp]||grp);
+    els.push({ data:{ id:grp, label, isGroup:1 } });
+  });
   (g.nodes||[]).forEach(n=>{
     const d={ id:n.id, label:n.label, type:n.type, group:n.group||'', agents:n.agents||[],
               description:n.description||'', body:n.body||'', parent:GROUP_OF[n.type] };
@@ -382,17 +410,21 @@ function graphToElements(g){
     const p=pos[n.id];
     els.push(p ? { data:d, position:{x:p.x,y:p.y} } : { data:d });
   });
-  let memEdge=false;
+  // Collapse detail edges to single group->group edges unless their toggle is on.
+  const once={};
+  const collapse=(key, src, tgt, kind)=>{ if(!once[key] && groups.has(src) && groups.has(tgt)){
+    els.push({ data:{ id:key, source:src, target:tgt, kind, conditional:'no' } }); once[key]=1; } };
   (g.edges||[]).forEach(e=>{
-    if(e.kind==='writes-memory'){
-      // Collapse the per-agent memory writes into one edge from the Agents group box.
-      if(!memEdge && groups.has('grp:agents') && ids.has(e.target)){
+    if(e.kind==='writes-memory'){ // memory is always a single edge from the Agents box
+      if(!once['mem'] && groups.has('grp:agents') && ids.has(e.target)){
         els.push({ data:{ id:'grp:agents->memory', source:'grp:agents', target:e.target,
-          kind:'writes-memory', conditional:'no' } });
-        memEdge=true;
-      }
+          kind:'writes-memory', conditional:'no' } }); once['mem']=1; }
       return;
     }
+    if(e.kind==='has-skill' && !EDGE_SKILL){ collapse('grp:agents->grp:skills','grp:agents','grp:skills','has-skill'); return; }
+    // agent -> server (not the lazily-added server -> tool edges)
+    if(e.kind==='uses-tool' && !EDGE_MCP && !String(e.source).startsWith('server:')){
+      collapse('grp:agents->grp:mcp','grp:agents','grp:mcp','uses-tool'); return; }
     els.push({ data:{ id:e.source+'->'+e.target+':'+e.kind, source:e.source, target:e.target,
       kind:e.kind, conditional:e.conditional?'yes':'no' } });
   });
@@ -400,6 +432,7 @@ function graphToElements(g){
 }
 
 function renderGraph(g){
+  GVIEW=g;   // the filtered graph currently shown (has per-agent edges for the detail panel)
   if(CY) CY.destroy();
   CY = cytoscape({ container:$('#cy'), elements:graphToElements(g), style:cyStyle(),
     layout:{ name:'preset', fit:true, padding:30 }, wheelSensitivity:0.2 });
@@ -441,6 +474,12 @@ function showNodeDetail(id){
   const d=n.data(); const tc=(GRUN&&GRUN.tool_calls&&GRUN.tool_calls[id])||[];
   let body='<div class="panel"><div><b>'+esc(d.label)+'</b> <span class="grp">'+esc(d.type)+'</span></div>';
   if(d.agents && d.agents.length) body+='<div class="mut" style="margin:4px 0">agents: '+esc(d.agents.join(', '))+'</div>';
+  if(d.type==='agent' && GVIEW){
+    const sk=(GVIEW.edges||[]).filter(e=>e.kind==='has-skill' && e.target===id).map(e=>String(e.source).replace('skill:',''));
+    const mc=(GVIEW.edges||[]).filter(e=>e.kind==='uses-tool' && e.source===id).map(e=>String(e.target).replace('server:',''));
+    body+='<div style="margin:4px 0">Skills: '+(sk.length?sk.map(esc).join(', '):'<span class="mut">none</span>')+'</div>';
+    body+='<div style="margin:4px 0">MCP servers: '+(mc.length?mc.map(esc).join(', '):'<span class="mut">none</span>')+'</div>';
+  }
   if(d.type==='skill'){
     if(d.description) body+='<div class="mut" style="margin:4px 0">'+esc(d.description)+'</div>';
     body+='<label>Skill instructions</label><pre>'+esc(d.body||'(no content)')+'</pre>';
@@ -462,11 +501,13 @@ function toggleGraphFull(force){
   if(CY){ CY.resize(); CY.fit(undefined,30); }
 }
 $('#g-full').onclick=()=>toggleGraphFull();
-$('#g-pr').onclick=()=>{
-  SHOW_PR=!SHOW_PR; $('#g-pr').classList.toggle('on',SHOW_PR);
+function redrawGraph(){
   if(GMODE==='system'){ if(GSYS) renderGraph(filterGraph(GSYS)); }
   else if(GRUN){ applyRunOverlay(GRUN); }
-};
+}
+$('#g-pr-cb').onchange=(e)=>{ PR_ONLY=e.target.checked; redrawGraph(); };
+$('#g-skill-cb').onchange=(e)=>{ EDGE_SKILL=e.target.checked; redrawGraph(); };
+$('#g-mcp-cb').onchange=(e)=>{ EDGE_MCP=e.target.checked; redrawGraph(); };
 document.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && $('#cy').classList.contains('cy-full')) toggleGraphFull(false); });
 $('#g-mode-system').onclick=()=>{ GMODE='system'; GRUN=null; clearInterval(gRunTimer);
   $('#g-mode-system').classList.add('on'); $('#g-mode-run').classList.remove('on');
