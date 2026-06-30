@@ -160,11 +160,13 @@ document.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && !$('#modal').c
 // tabs
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));
-  ['chat','runs','skills','config'].forEach(t=>$('#tab-'+t).classList.toggle('hide', t!==b.dataset.tab));
+  ['chat','runs','skills','config','graph'].forEach(t=>$('#tab-'+t).classList.toggle('hide', t!==b.dataset.tab));
   stopRunsAuto();
+  clearInterval(gRunTimer);
   if(b.dataset.tab==='runs') startRunsAuto();
   if(b.dataset.tab==='skills') loadSkills();
   if(b.dataset.tab==='config') loadConfig();
+  if(b.dataset.tab==='graph') openGraphTab();
 });
 
 // ---- run card + polling ----
@@ -287,6 +289,104 @@ $('#sec-save').onclick=async()=>{
   if(!Object.keys(data).length){ toast('nothing to set'); return; }
   try{ await j('PUT','/api/secrets',{data}); toast('keys updated + restart'); loadConfig(); }catch(e){ toast(e.message,true); }
 };
+
+// ---- graph visualize ----
+let CY=null, GMODE='system', GRUN=null, gRunTimer=null;
+const SERVER_COLORS={kubernetes:'#1f6feb',prometheus:'#e6522c',github:'#6e40c9'};
+function cyStyle(){ return [
+  { selector:'node', style:{ 'label':'data(label)','color':'#e6edf3','font-size':11,
+      'text-valign':'center','text-halign':'center','text-wrap':'wrap','text-max-width':110 } },
+  { selector:'node[type="agent"]', style:{ 'shape':'round-rectangle','background-color':'#1a2230',
+      'border-color':'#4c8eff','border-width':2,'width':130,'height':46,'text-valign':'center' } },
+  { selector:'node[group="webhook"]', style:{ 'border-color':'#d29922','border-style':'dashed' } },
+  { selector:'node[type="endpoint"]', style:{ 'shape':'ellipse','background-color':'#2b3648',
+      'border-width':0,'width':54,'height':54,'color':'#8b98a9' } },
+  { selector:'node[type="server"]', style:{ 'shape':'round-rectangle','background-color':'data(color)',
+      'border-width':0,'width':120,'height':38,'color':'#fff' } },
+  { selector:'node[type="skill"]', style:{ 'shape':'round-rectangle','background-color':'#30363d',
+      'border-width':0,'width':96,'height':30,'font-size':10,'color':'#c9d1d9' } },
+  { selector:'node[type="memory"]', style:{ 'shape':'barrel','background-color':'#16301c',
+      'border-color':'#3fb950','border-width':2,'width':120,'height':44,'color':'#3fb950' } },
+  { selector:'node[type="tool"]', style:{ 'shape':'round-rectangle','background-color':'#0d1117',
+      'border-color':'#2b3648','border-width':1,'width':110,'height':26,'font-size':9,'color':'#8b98a9' } },
+  { selector:'edge', style:{ 'width':1.5,'line-color':'#2b3648','target-arrow-color':'#2b3648',
+      'target-arrow-shape':'triangle','curve-style':'bezier' } },
+  { selector:'edge[kind="flow"]', style:{ 'line-color':'#4c8eff','target-arrow-color':'#4c8eff','width':2 } },
+  { selector:'edge[conditional="yes"]', style:{ 'line-style':'dashed' } },
+  { selector:'edge[kind="has-skill"]', style:{ 'line-color':'#30363d','target-arrow-shape':'none','line-style':'dotted' } },
+  { selector:'edge[kind="writes-memory"]', style:{ 'line-color':'#26402c','target-arrow-color':'#26402c','line-style':'dashed' } },
+  { selector:'edge[kind="uses-tool"]', style:{ 'line-color':'#3a3f4b','target-arrow-color':'#3a3f4b' } },
+  // run-overlay states
+  { selector:'node.ran', style:{ 'border-color':'#3fb950','border-width':3 } },
+  { selector:'node.current', style:{ 'border-color':'#d29922','border-width':3 } },
+  { selector:'node.dimmed', style:{ 'opacity':0.35 } },
+  { selector:'node.badge', style:{ 'label':'data(blabel)' } },
+]; }
+
+function graphToElements(g){
+  const els=[];
+  (g.nodes||[]).forEach(n=>{
+    const d={ id:n.id, label:n.label, type:n.type, group:n.group||'' };
+    if(n.type==='server') d.color=SERVER_COLORS[n.label]||'#3a3f4b';
+    els.push({ data:d });
+  });
+  (g.edges||[]).forEach(e=>els.push({ data:{
+    id:e.source+'->'+e.target+':'+e.kind, source:e.source, target:e.target,
+    kind:e.kind, conditional:e.conditional?'yes':'no' } }));
+  return els;
+}
+
+function renderGraph(g){
+  CY = cytoscape({ container:$('#cy'), elements:graphToElements(g), style:cyStyle(),
+    layout:{ name:'breadthfirst', directed:true, spacingFactor:1.2, padding:20,
+      roots:['START'] }, wheelSensitivity:0.2 });
+  CY.on('tap','node[type="server"]', (evt)=>expandServerTools(evt.target));
+  CY.on('tap','node', (evt)=>showNodeDetail(evt.target.id()));
+  return CY;
+}
+
+async function openGraphTab(){
+  if(GMODE==='system') loadSystemGraph(); else loadRunPicker();
+}
+async function loadSystemGraph(){
+  $('#g-status').textContent='loading…';
+  try{ const g=await j('GET','/api/graph'); renderGraph(g); $('#g-status').textContent=''; }
+  catch(e){ $('#g-status').textContent=e.message; }
+}
+async function expandServerTools(node){
+  const id=node.id(); if(node.data('expanded')) return; node.data('expanded',true);
+  const server=node.data('label');
+  $('#g-status').textContent='listing '+server+' tools…';
+  try{
+    const r=await j('GET','/api/graph/tools/'+encodeURIComponent(server));
+    if(r.error && !(r.tools||[]).length){ $('#g-status').textContent=server+': '+r.error; return; }
+    (r.tools||[]).forEach(t=>{
+      const tid='tool:'+server+':'+t;
+      CY.add([{ data:{ id:tid, label:t, type:'tool', group:server } },
+              { data:{ id:tid+'-e', source:id, target:tid, kind:'uses-tool', conditional:'no' } }]);
+    });
+    CY.layout({ name:'breadthfirst', directed:true, spacingFactor:1.2, padding:20, roots:['START'] }).run();
+    $('#g-status').textContent='';
+  }catch(e){ $('#g-status').textContent=e.message; }
+}
+function showNodeDetail(id){
+  const n=CY.getElementById(id); if(!n||!n.length) return;
+  const d=n.data(); const tc=(GRUN&&GRUN.tool_calls&&GRUN.tool_calls[id])||[];
+  let body='<div class="panel"><div><b>'+esc(d.label)+'</b> <span class="grp">'+esc(d.type)+'</span></div>';
+  if(GRUN && GRUN.run && (id==='rca')) body+=(GRUN.run.hypothesis?'<label>Hypothesis</label><pre>'+esc(GRUN.run.hypothesis)+'</pre>':'');
+  if(GRUN && GRUN.run && (id==='action')){ const p=GRUN.run.remediation_plan||{};
+    if(p.summary) body+='<label>Plan</label><div class="mut">'+esc(p.summary)+' — <code>'+esc(p.file_path||'')+'</code></div>'; }
+  body+=toolCallsHtml(tc)+'</div>';
+  $('#modal-body').innerHTML=body; $('#modal').classList.remove('hide');
+}
+
+$('#g-fit').onclick=()=>{ if(CY) CY.fit(undefined,30); };
+$('#g-mode-system').onclick=()=>{ GMODE='system'; GRUN=null; clearInterval(gRunTimer);
+  $('#g-mode-system').classList.add('on'); $('#g-mode-run').classList.remove('on');
+  $('#g-run-sel').classList.add('hide'); loadSystemGraph(); };
+$('#g-mode-run').onclick=()=>{ GMODE='run';
+  $('#g-mode-run').classList.add('on'); $('#g-mode-system').classList.remove('on');
+  $('#g-run-sel').classList.remove('hide'); loadRunPicker(); };
 </script>
 </body>
 </html>
