@@ -40,6 +40,13 @@
   .modal-box { width:min(760px,94vw); max-height:86vh; overflow:auto; }
   .modal-box .panel { margin:0; }
   .modal-x { position:absolute; top:12px; right:16px; width:32px; height:32px; border-radius:6px; background:var(--panel); color:var(--fg); border:1px solid var(--line); cursor:pointer; font-size:15px; z-index:51; }
+  #cy { height:560px; background:#0d1117; border:1px solid var(--line); border-radius:8px; }
+  .g-toolbar { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .g-toolbar .seg button { background:#0d1117; color:var(--mut); border:1px solid var(--line); padding:6px 12px; cursor:pointer; }
+  .g-toolbar .seg button.on { background:var(--acc); color:#fff; border-color:var(--acc); }
+  .g-toolbar select { width:auto; min-width:240px; }
+  .g-legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--mut); margin-top:8px; }
+  .g-legend span b { color:var(--fg); }
 </style>
 </head>
 <body>
@@ -47,6 +54,7 @@
   <b>🤖 OpsGentic Console</b>
   <nav>
     <button data-tab="runs" class="active">Runs</button>
+    <button data-tab="graph">Graph</button>
     <button data-tab="chat">Chat</button>
     <button data-tab="skills">Skills</button>
     <button data-tab="config">Config</button>
@@ -60,6 +68,27 @@
       <div class="mut" style="font-size:12px">Auto-refreshing every 5s</div>
       <table style="margin-top:10px"><thead><tr><th>Status</th><th>Alert</th><th>Service</th><th>Repo</th><th>Src</th><th>When</th><th>PR</th></tr></thead>
       <tbody id="r-rows"><tr><td colspan="7" class="mut">Loading…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section id="tab-graph" class="hide">
+    <div class="panel">
+      <div class="g-toolbar">
+        <div class="seg">
+          <button id="g-mode-system" class="on">System</button>
+          <button id="g-mode-run">Run</button>
+        </div>
+        <select id="g-run-sel" class="hide"></select>
+        <span class="sp" style="flex:1"></span>
+        <button class="act" id="g-fit">Fit</button>
+        <span class="mut" id="g-status"></span>
+      </div>
+      <div id="cy"></div>
+      <div class="g-legend">
+        <span><b>▭</b> agent</span><span><b>◉</b> MCP server</span>
+        <span><b>▰</b> skill</span><span><b>⬡</b> memory</span>
+        <span><b>– –</b> conditional edge</span>
+      </div>
     </div>
   </section>
 
@@ -109,6 +138,7 @@
   <button class="modal-x" id="modal-close" title="Close (Esc)">✕</button>
   <div class="modal-box" id="modal-body"></div>
 </div>
+<script src="/vendor/cytoscape.min.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const j = async (m, u, b) => { const r = await fetch(u, {method:m, headers:{'content-type':'application/json'}, body:b?JSON.stringify(b):undefined}); const t = await r.text(); let d; try{d=JSON.parse(t)}catch{d=t} if(!r.ok) throw new Error((d&&d.error)||t||r.status); return d; };
