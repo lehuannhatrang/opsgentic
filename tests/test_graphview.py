@@ -13,7 +13,10 @@ def test_system_graph_has_flow_nodes_and_endpoints():
     g = graphview.build_system_graph()
     ids = {n["id"] for n in g["nodes"]}
     assert {"rca", "resolve_target", "validation", "action"} <= ids
-    assert {"START", "END", "memory"} <= ids
+    assert {"END", "memory"} <= ids
+    # START is replaced by a Trigger / Hook group feeding rca.
+    assert {"trigger:chat", "trigger:alert"} <= ids
+    assert "START" not in ids
     flow_agents = {n["id"] for n in g["nodes"] if n["type"] == "agent" and n["group"] == "flow"}
     assert {"rca", "resolve_target", "validation", "action"} <= flow_agents
 
@@ -24,7 +27,9 @@ def test_system_graph_conditional_validation_edges():
     cond_targets = {e["target"] for e in flow if e["source"] == "validation" and e["conditional"]}
     assert {"action", "rca", "END"} <= cond_targets
     straight = {(e["source"], e["target"]) for e in flow if not e["conditional"]}
-    assert ("START", "rca") in straight
+    # Both triggers feed rca (the former START -> rca edge fans out across triggers).
+    assert ("trigger:chat", "rca") in straight
+    assert ("trigger:alert", "rca") in straight
     assert ("rca", "resolve_target") in straight
 
 
@@ -160,3 +165,30 @@ def test_build_run_graph_pr_comment_path(monkeypatch):
     assert g["executed"] == [{"step": 0, "node": "pr-responder", "iteration": 1}]
     assert g["tool_calls"]["pr-responder"]
     assert g["run"]["kind"] == "answer"
+
+
+def test_build_run_graph_exposes_action_tool_calls(monkeypatch):
+    from opsgentic import runner
+
+    history = [
+        _Snap({"source": "loop", "writes": {"action": {}}}),
+        _Snap({"source": "loop", "writes": {"validation": {}}}),
+        _Snap({"source": "loop", "writes": {"resolve_target": {}}}),
+        _Snap({"source": "loop", "writes": {"rca": {}}}),
+    ]
+    snap = {
+        "thread_id": "t2", "status": "applied", "next": [], "summary": {},
+        "state": {
+            "context_data": {"tool_calls": [{"server": "kubernetes", "name": "pods_list"}]},
+            "remediation_tool_calls": [{"server": "github", "name": "get_file_contents"}],
+            "execution_status": "applied",
+        },
+    }
+    monkeypatch.setattr(runner, "get_run", lambda tid: snap)
+    monkeypatch.setattr(runner, "_config", lambda tid: {})
+    monkeypatch.setattr(runner, "_app", _FakeApp(history))
+
+    g = graphview.build_run_graph("t2")
+    # tool calls keyed by the node that made them: context->rca, remediation->action.
+    assert g["tool_calls"]["rca"][0]["name"] == "pods_list"
+    assert g["tool_calls"]["action"][0]["name"] == "get_file_contents"

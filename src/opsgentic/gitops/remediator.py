@@ -40,29 +40,32 @@ _OUTPUT_RULES = (
 )
 
 
-def generate_edits(state: dict) -> Optional[list]:
+def generate_edits(state: dict) -> tuple[Optional[list], list]:
     """Run a read-only remediation agent that reads the repo (via MCP) and proposes
-    surgical field edits. Returns [{path, ops: [{yaml_path, value}]}] or None to fall
-    back (MCP disabled, no LLM, no resolved repo, agent error, or no edits proposed)."""
+    surgical field edits. Returns (edits, tool_calls): edits is [{path, ops: [{yaml_path,
+    value}]}] or None to fall back (MCP disabled, no LLM, no resolved repo, agent error, or
+    no edits proposed); tool_calls is the MCP audit trail (for the run graph), [] on fallback."""
     if not get_settings().mcp_enabled or get_llm() is None:
-        return None
+        return None, []
     if not state.get("gitops_target"):
-        return None
+        return None, []
     # Retry: take the first attempt that yields concrete edits. Each attempt is read-only
     # (proposes edits in memory; no commit/PR), so retrying has no side effects.
+    last_calls: list = []
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            edits = asyncio.run(_run(state))
+            edits, tool_calls = asyncio.run(_run(state))
         except Exception as exc:
             logger.warning("remediation agent attempt %d/%d failed: %s",
                            attempt, _MAX_ATTEMPTS, explain_exception(exc), exc_info=True)
-            edits = None
+            edits, tool_calls = None, []
+        last_calls = tool_calls or last_calls
         if edits:
             if attempt > 1:
                 logger.info("remediation agent produced edits on attempt %d/%d", attempt, _MAX_ATTEMPTS)
-            return edits
+            return edits, tool_calls
         logger.warning("remediation agent attempt %d/%d produced no edits", attempt, _MAX_ATTEMPTS)
-    return None
+    return None, last_calls
 
 
 class _FieldEdit(BaseModel):
@@ -149,15 +152,24 @@ def reassess_edits(state: dict, proposed_diff: str) -> tuple[bool, str, Optional
         return True, "reassessment error; leaving the existing PR unchanged", None
 
 
-async def _run(state: dict) -> Optional[list]:
+async def _run(state: dict) -> tuple[Optional[list], list]:
     from langchain_mcp_adapters.client import MultiServerMCPClient
     from langgraph.prebuilt import create_react_agent
 
+    from opsgentic.mcp.agent_tools import summarize_tool_calls
+
     connections = load_connections()          # all servers (cluster + repo)
     if not connections:
-        return None
+        return None, []
     _auth_github(connections)                 # fresh GitHub App token for github-mcp
-    tools = [t for t in await MultiServerMCPClient(connections).get_tools() if t.name not in _DENY]
+    # Fetch per server so each tool's origin is known for the run-graph audit trail.
+    client = MultiServerMCPClient(connections)
+    tools, tool_server = [], {}
+    for server_name in connections:
+        for t in await client.get_tools(server_name=server_name):
+            tool_server[t.name] = server_name
+            if t.name not in _DENY:
+                tools.append(t)
 
     # response_format: after reading the repo, langgraph forces a final structured answer via
     # with_structured_output(). This is far more reliable than hoping the model voluntarily calls
@@ -184,10 +196,11 @@ async def _run(state: dict) -> Optional[list]:
         config={"recursion_limit": get_settings().mcp_recursion_limit},
     )
 
+    tool_calls = summarize_tool_calls(result.get("messages", []), tool_server)
     structured = result.get("structured_response")
     if structured is None:
-        return None
-    return edits_to_ops(structured.edits) or None
+        return None, tool_calls
+    return (edits_to_ops(structured.edits) or None), tool_calls
 
 
 def _auth_github(connections: dict) -> None:

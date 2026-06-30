@@ -6,12 +6,26 @@ from opsgentic.mcp.loader import load_connections
 
 # Pretty labels for the four LangGraph nodes.
 _NODE_LABELS = {
-    "rca": "RCA",
-    "resolve_target": "Resolve target",
-    "validation": "Validation",
-    "action": "Action (remediation)",
+    "rca": "RCA Agent",
+    "resolve_target": "Resolve Target Agent",
+    "validation": "Validation Agent",
+    "action": "Action Agent",
 }
-_ENDPOINT_MAP = {"__start__": "START", "__end__": "END"}
+_ENDPOINT_MAP = {"__end__": "END"}
+
+# Real run triggers that enqueue the graph (runner.enqueue from these entry points).
+# Rendered as a "Trigger / Hook" group feeding the first node instead of a bare START.
+_TRIGGERS = [
+    {"id": "trigger:chat", "label": "Chat API"},
+    {"id": "trigger:alert", "label": "Webhook Alert"},
+]
+
+
+def _memory_label() -> str:
+    """Reflect the actual checkpoint backend (PostgresSaver when DATABASE_URL is set)."""
+    from opsgentic.config import get_settings
+
+    return "Memory (Postgres)" if get_settings().database_url else "Memory (in-mem)"
 
 
 def _compiled_graph():
@@ -41,25 +55,30 @@ def build_system_graph() -> dict:
             nodes.append(node)
             node_ids.add(node["id"])
 
-    # Endpoints + flow nodes (each flow node is where an agent runs).
-    add_node({"id": "START", "type": "endpoint", "label": "START", "group": "flow"})
+    # Trigger sources (replace the bare START) + END endpoint + flow nodes (where agents run).
+    for tr in _TRIGGERS:
+        add_node({"id": tr["id"], "type": "trigger", "label": tr["label"], "group": "trigger"})
     add_node({"id": "END", "type": "endpoint", "label": "END", "group": "flow"})
     for node_id in NODE_AGENTS:
         add_node({"id": node_id, "type": "agent", "label": _NODE_LABELS.get(node_id, node_id),
                   "group": "flow", "agents": NODE_AGENTS[node_id]})
 
     # Memory + servers.
-    add_node({"id": "memory", "type": "memory", "label": "Memory (checkpoint)", "group": "memory"})
+    add_node({"id": "memory", "type": "memory", "label": _memory_label(), "group": "memory"})
     for sname, conn in servers.items():
         add_node({"id": f"server:{sname}", "type": "server", "label": sname, "group": sname,
                   "transport": conn.get("transport"), "url": conn.get("url"), "tools": None})
 
-    # Control-flow edges from the compiled graph.
+    # Control-flow edges from the compiled graph. The START edge fans out from every trigger.
     for e in g.edges:
-        src = _ENDPOINT_MAP.get(e.source, e.source)
         tgt = _ENDPOINT_MAP.get(e.target, e.target)
-        edges.append({"source": src, "target": tgt, "kind": "flow",
-                      "conditional": bool(getattr(e, "conditional", False))})
+        cond = bool(getattr(e, "conditional", False))
+        if e.source == "__start__":
+            for tr in _TRIGGERS:
+                edges.append({"source": tr["id"], "target": tgt, "kind": "flow", "conditional": cond})
+            continue
+        edges.append({"source": _ENDPOINT_MAP.get(e.source, e.source), "target": tgt,
+                      "kind": "flow", "conditional": cond})
 
     skills = agent_skills._load_all()
 
@@ -72,7 +91,8 @@ def build_system_graph() -> dict:
         for sk in skills:
             if any(a in sk.agents for a in agents):
                 sid = f"skill:{sk.name}"
-                add_node({"id": sid, "type": "skill", "label": sk.name, "group": "skill"})
+                add_node({"id": sid, "type": "skill", "label": sk.name, "group": "skill",
+                          "description": sk.description, "body": sk.body})
                 edges.append({"source": sid, "target": node_id, "kind": "has-skill", "conditional": False})
 
     for node_id, agents in NODE_AGENTS.items():
@@ -80,8 +100,10 @@ def build_system_graph() -> dict:
         edges.append({"source": node_id, "target": "memory", "kind": "writes-memory", "conditional": False})
 
     # Off-graph agents (webhook), e.g. pr-responder — tools/skills only, no flow edges.
+    _off_labels = {"pr-responder": "PR Responder"}
     for agent in OFF_GRAPH_AGENTS:
-        add_node({"id": agent, "type": "agent", "label": agent.replace("-", " ").title(),
+        add_node({"id": agent, "type": "agent",
+                  "label": _off_labels.get(agent, agent.replace("-", " ").title()),
                   "group": "webhook", "agents": [agent]})
         attach(agent, [agent])
 
@@ -150,11 +172,17 @@ def build_run_graph(thread_id: str) -> dict:
             n["status"] = "current" if n["id"] in nxt else ("ran" if n["id"] in ran else "pending")
 
     state = snap.get("state") or {}
-    # Only the context phase (rca node) records a tool-call audit trail in state today;
-    # the action node's remediator calls are not persisted, so the action node shows none.
-    tool_calls = (state.get("context_data") or {}).get("tool_calls") or []
+    # Tool-call audit trails, keyed by the flow node that made them: the context agent runs
+    # in the rca node; the remediation agent runs in the action node.
+    tool_calls: dict = {}
+    ctx_calls = (state.get("context_data") or {}).get("tool_calls") or []
+    if ctx_calls:
+        tool_calls["rca"] = ctx_calls
+    action_calls = state.get("remediation_tool_calls") or []
+    if action_calls:
+        tool_calls["action"] = action_calls
     graph["executed"] = steps
-    graph["tool_calls"] = {"rca": tool_calls} if tool_calls else {}
+    graph["tool_calls"] = tool_calls
     graph["run"] = {
         "thread_id": thread_id,
         "status": snap.get("status"),

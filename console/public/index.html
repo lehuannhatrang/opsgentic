@@ -301,49 +301,56 @@ const SERVER_COLORS={kubernetes:'#1f6feb',prometheus:'#e6522c',github:'#6e40c9'}
 // Layout: a left-to-right flow backbone, with skills above and MCP servers/memory below,
 // each category wrapped in a compound "group" box. Positions are computed (preset layout)
 // so the grouping is deterministic and the pipeline order stays readable.
-const FLOW_ORDER=['START','rca','resolve_target','validation','action','END'];
-const COLW=210, AGENT_Y=0, SKILL_Y=-220, SERVER_Y=250;
-const GROUP_OF={agent:'grp:agents',endpoint:'grp:agents',skill:'grp:skills',server:'grp:mcp',tool:'grp:mcp',memory:'grp:memory'};
-const GROUP_LABEL={'grp:agents':'Agents & flow','grp:skills':'Skills','grp:mcp':'MCP servers','grp:memory':'Memory'};
+const FLOW_ORDER=['rca','resolve_target','validation','action','END'];
+const COLW=240, AGENT_Y=0, SKILL_Y=-250, SERVER_Y=280, ZIG=70;
+const GROUP_OF={agent:'grp:agents',endpoint:'grp:agents',trigger:'grp:trigger',skill:'grp:skills',server:'grp:mcp',tool:'grp:mcp',memory:'grp:memory'};
+const GROUP_LABEL={'grp:trigger':'Trigger / Hook','grp:agents':'Agents & flow','grp:skills':'Skills','grp:mcp':'MCP servers','grp:memory':'Memory'};
 function cyStyle(){ return [
-  { selector:'node', style:{ 'label':'data(label)','color':'#e6edf3','font-size':12,
-      'text-valign':'center','text-halign':'center','text-wrap':'wrap','text-max-width':120 } },
-  { selector:'node[isGroup]', style:{ 'shape':'round-rectangle','background-color':'#8b98a9',
-      'background-opacity':0.06,'border-width':1,'border-color':'#3a4456','border-style':'dashed',
-      'label':'data(label)','text-valign':'top','text-halign':'center','text-margin-y':-6,
-      'color':'#aeb9c8','font-size':13,'font-weight':'bold','padding':24 } },
-  { selector:'node[type="agent"]', style:{ 'shape':'round-rectangle','background-color':'#1a2230',
-      'border-color':'#4c8eff','border-width':2,'width':140,'height':50,'text-valign':'center' } },
-  { selector:'node[group="webhook"]', style:{ 'border-color':'#d29922','border-style':'dashed' } },
-  { selector:'node[type="endpoint"]', style:{ 'shape':'ellipse','background-color':'#2b3648',
-      'border-width':0,'width':56,'height':56,'color':'#8b98a9' } },
+  { selector:'node', style:{ 'label':'data(label)','color':'#f3f6fb','font-size':15,'font-weight':'bold',
+      'text-valign':'center','text-halign':'center','text-wrap':'wrap','text-max-width':140 } },
+  { selector:'node[isGroup]', style:{ 'shape':'round-rectangle','background-color':'#7f8ba0',
+      'background-opacity':0.10,'border-width':2,'border-color':'#5b6880',
+      'label':'data(label)','text-valign':'top','text-halign':'center','text-margin-y':-8,
+      'color':'#dbe3ef','font-size':20,'font-weight':'bold','padding':30 } },
+  { selector:'node[type="agent"]', style:{ 'shape':'round-rectangle','background-color':'#243650',
+      'border-color':'#6aa3ff','border-width':3,'width':156,'height':56,'font-size':15 } },
+  { selector:'node[group="webhook"]', style:{ 'background-color':'#3a2f14','border-color':'#e3a93a','border-style':'dashed' } },
+  { selector:'node[type="trigger"]', style:{ 'shape':'round-rectangle','background-color':'#10323d',
+      'border-color':'#3bc0dd','border-width':2.5,'width':140,'height':48,'color':'#9fe6f4' } },
+  { selector:'node[type="endpoint"]', style:{ 'shape':'round-rectangle','background-color':'#3b4660',
+      'border-width':0,'width':86,'height':46,'color':'#dbe3ef' } },
   { selector:'node[type="server"]', style:{ 'shape':'round-rectangle','background-color':'data(color)',
-      'border-width':0,'width':128,'height':42,'color':'#fff','font-weight':'bold' } },
-  { selector:'node[type="skill"]', style:{ 'shape':'round-rectangle','background-color':'#30363d',
-      'border-width':0,'width':104,'height':34,'font-size':11,'color':'#c9d1d9' } },
-  { selector:'node[type="memory"]', style:{ 'shape':'barrel','background-color':'#16301c',
-      'border-color':'#3fb950','border-width':2,'width':128,'height':48,'color':'#3fb950' } },
-  { selector:'node[type="tool"]', style:{ 'shape':'round-rectangle','background-color':'#0d1117',
-      'border-color':'#2b3648','border-width':1,'width':118,'height':28,'font-size':9,'color':'#8b98a9' } },
-  { selector:'edge', style:{ 'width':2.5,'line-color':'#6b7689','target-arrow-color':'#6b7689',
-      'target-arrow-shape':'triangle','arrow-scale':1.2,'curve-style':'bezier','opacity':0.95 } },
-  { selector:'edge[kind="flow"]', style:{ 'line-color':'#4c8eff','target-arrow-color':'#4c8eff','width':4 } },
+      'border-width':0,'width':140,'height':46,'color':'#fff','font-size':15 } },
+  { selector:'node[type="skill"]', style:{ 'shape':'round-rectangle','background-color':'#42495a',
+      'border-width':0,'width':118,'height':40,'font-size':13,'color':'#eef2f8' } },
+  { selector:'node[type="memory"]', style:{ 'shape':'barrel','background-color':'#16401f',
+      'border-color':'#46d36a','border-width':3,'width':140,'height':54,'color':'#8df0a8','font-size':15 } },
+  { selector:'node[type="tool"]', style:{ 'shape':'round-rectangle','background-color':'#10161f',
+      'border-color':'#4a566b','border-width':1.5,'width':128,'height':32,'font-size':11,'font-weight':'normal','color':'#c4cedd' } },
+  { selector:'edge', style:{ 'width':3,'line-color':'#9aa6ba','target-arrow-color':'#9aa6ba',
+      'target-arrow-shape':'triangle','arrow-scale':1.4,'curve-style':'bezier','opacity':1 } },
+  { selector:'edge[kind="flow"]', style:{ 'line-color':'#5aa0ff','target-arrow-color':'#5aa0ff','width':5 } },
   { selector:'edge[conditional="yes"]', style:{ 'line-style':'dashed' } },
-  { selector:'edge[kind="has-skill"]', style:{ 'line-color':'#9b7fe0','target-arrow-shape':'none','line-style':'dotted','width':2.5 } },
-  { selector:'edge[kind="writes-memory"]', style:{ 'line-color':'#3fb950','target-arrow-color':'#3fb950','line-style':'dashed','width':2.5 } },
-  { selector:'edge[kind="uses-tool"]', style:{ 'line-color':'#9aa6b6','target-arrow-color':'#9aa6b6','width':2.5 } },
+  { selector:'edge[kind="has-skill"]', style:{ 'line-color':'#c4abf0','target-arrow-shape':'none','line-style':'dotted','width':3 } },
+  { selector:'edge[kind="writes-memory"]', style:{ 'line-color':'#52d873','target-arrow-color':'#52d873','line-style':'dashed','width':3.5 } },
+  { selector:'edge[kind="uses-tool"]', style:{ 'line-color':'#b8c2d2','target-arrow-color':'#b8c2d2','width':3 } },
   // run-overlay states
-  { selector:'node.ran', style:{ 'border-color':'#3fb950','border-width':4 } },
-  { selector:'node.current', style:{ 'border-color':'#d29922','border-width':4 } },
-  { selector:'node.dimmed', style:{ 'opacity':0.35 } },
+  { selector:'node.ran', style:{ 'border-color':'#46d36a','border-width':5 } },
+  { selector:'node.current', style:{ 'border-color':'#e3a93a','border-width':5 } },
+  { selector:'node.dimmed', style:{ 'opacity':0.4 } },
   { selector:'node.badge', style:{ 'label':'data(blabel)' } },
 ]; }
 
 function computePositions(g){
   const pos={}; const nodes=g.nodes||[];
-  FLOW_ORDER.forEach((id,i)=>{ if(nodes.some(n=>n.id===id)) pos[id]={x:i*COLW,y:AGENT_Y}; });
+  // Flow backbone, zig-zagged so the conditional edges (validation -> rca/action/END) read clearly.
+  FLOW_ORDER.forEach((id,i)=>{ if(nodes.some(n=>n.id===id)) pos[id]={x:i*COLW, y:AGENT_Y+((i%2)?ZIG:-ZIG)}; });
   const maxX=(FLOW_ORDER.length-1)*COLW, span=maxX||COLW;
-  nodes.filter(n=>n.type==='agent' && n.group==='webhook').forEach((n,i)=>{ pos[n.id]={x:maxX+COLW*(i+1),y:AGENT_Y+100}; });
+  // Triggers feed rca from the left.
+  const trig=nodes.filter(n=>n.type==='trigger');
+  trig.forEach((n,i)=>{ pos[n.id]={ x:-COLW, y: AGENT_Y + (trig.length>1 ? (i-(trig.length-1)/2)*130 : 0) }; });
+  // Off-graph agents (pr-responder) to the right.
+  nodes.filter(n=>n.type==='agent' && n.group==='webhook').forEach((n,i)=>{ pos[n.id]={x:maxX+COLW*(i+1),y:AGENT_Y+130}; });
   const skills=nodes.filter(n=>n.type==='skill');
   skills.forEach((n,i)=>{ pos[n.id]={x: skills.length>1 ? i*span/(skills.length-1) : span/2, y:SKILL_Y}; });
   const servers=nodes.filter(n=>n.type==='server');
@@ -355,7 +362,7 @@ function computePositions(g){
 // Optionally drop the off-graph pr-responder agent (and its edges + skills wired only to it).
 // No-op on a comment-run graph (no flow backbone), which is entirely about pr-responder.
 function filterGraph(g){
-  if(SHOW_PR || !(g.nodes||[]).some(n=>n.id==='START')) return g;
+  if(SHOW_PR || !(g.nodes||[]).some(n=>n.id==='rca')) return g;
   const edges=(g.edges||[]).filter(e=>e.source!=='pr-responder' && e.target!=='pr-responder');
   const ref=new Set(); edges.forEach(e=>{ ref.add(e.source); ref.add(e.target); });
   const nodes=(g.nodes||[]).filter(n=>
@@ -365,17 +372,30 @@ function filterGraph(g){
 
 function graphToElements(g){
   const els=[]; const pos=computePositions(g); const groups=new Set();
+  const ids=new Set((g.nodes||[]).map(n=>n.id));
   (g.nodes||[]).forEach(n=>{ const grp=GROUP_OF[n.type]; if(grp) groups.add(grp); });
   groups.forEach(grp=>els.push({ data:{ id:grp, label:GROUP_LABEL[grp]||grp, isGroup:1 } }));
   (g.nodes||[]).forEach(n=>{
-    const d={ id:n.id, label:n.label, type:n.type, group:n.group||'', agents:n.agents||[], parent:GROUP_OF[n.type] };
+    const d={ id:n.id, label:n.label, type:n.type, group:n.group||'', agents:n.agents||[],
+              description:n.description||'', body:n.body||'', parent:GROUP_OF[n.type] };
     if(n.type==='server') d.color=SERVER_COLORS[n.label]||'#3a3f4b';
     const p=pos[n.id];
     els.push(p ? { data:d, position:{x:p.x,y:p.y} } : { data:d });
   });
-  (g.edges||[]).forEach(e=>els.push({ data:{
-    id:e.source+'->'+e.target+':'+e.kind, source:e.source, target:e.target,
-    kind:e.kind, conditional:e.conditional?'yes':'no' } }));
+  let memEdge=false;
+  (g.edges||[]).forEach(e=>{
+    if(e.kind==='writes-memory'){
+      // Collapse the per-agent memory writes into one edge from the Agents group box.
+      if(!memEdge && groups.has('grp:agents') && ids.has(e.target)){
+        els.push({ data:{ id:'grp:agents->memory', source:'grp:agents', target:e.target,
+          kind:'writes-memory', conditional:'no' } });
+        memEdge=true;
+      }
+      return;
+    }
+    els.push({ data:{ id:e.source+'->'+e.target+':'+e.kind, source:e.source, target:e.target,
+      kind:e.kind, conditional:e.conditional?'yes':'no' } });
+  });
   return els;
 }
 
@@ -421,10 +441,17 @@ function showNodeDetail(id){
   const d=n.data(); const tc=(GRUN&&GRUN.tool_calls&&GRUN.tool_calls[id])||[];
   let body='<div class="panel"><div><b>'+esc(d.label)+'</b> <span class="grp">'+esc(d.type)+'</span></div>';
   if(d.agents && d.agents.length) body+='<div class="mut" style="margin:4px 0">agents: '+esc(d.agents.join(', '))+'</div>';
+  if(d.type==='skill'){
+    if(d.description) body+='<div class="mut" style="margin:4px 0">'+esc(d.description)+'</div>';
+    body+='<label>Skill instructions</label><pre>'+esc(d.body||'(no content)')+'</pre>';
+  }
   if(GRUN && GRUN.run && (id==='rca')) body+=(GRUN.run.hypothesis?'<label>Hypothesis</label><pre>'+esc(GRUN.run.hypothesis)+'</pre>':'');
   if(GRUN && GRUN.run && (id==='action')){ const p=GRUN.run.remediation_plan||{};
     if(p.summary) body+='<label>Plan</label><div class="mut">'+esc(p.summary)+' — <code>'+esc(p.file_path||'')+'</code></div>'; }
-  body+=toolCallsHtml(tc)+'</div>';
+  body+=toolCallsHtml(tc);
+  if(GRUN && d.type==='agent' && d.group==='flow' && !tc.length)
+    body+='<div class="mut" style="margin-top:8px">No tool calls recorded for this node in this run.</div>';
+  body+='</div>';
   $('#modal-body').innerHTML=body; $('#modal').classList.remove('hide');
 }
 
