@@ -6,11 +6,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from opsgentic.agent_registry import AGENT_TOOLS
 from opsgentic.agent_skills import render
 from opsgentic.agents.llm import get_llm
 from opsgentic.config import get_settings
 from opsgentic.gitops.remediator import _FieldEdit
-from opsgentic.agent_registry import AGENT_TOOLS
 from opsgentic.mcp.agent_tools import load_tools, log_tool_calls, summarize_tool_calls
 
 logger = logging.getLogger(__name__)
