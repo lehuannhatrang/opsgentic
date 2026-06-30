@@ -82,6 +82,7 @@
           <button id="g-mode-run">Run</button>
         </div>
         <select id="g-run-sel" class="hide"></select>
+        <div class="seg"><button id="g-pr" class="on">PR responder</button></div>
         <span class="sp" style="flex:1"></span>
         <button class="act" id="g-fit">Fit</button>
         <button class="act" id="g-full">Fullscreen</button>
@@ -295,7 +296,7 @@ $('#sec-save').onclick=async()=>{
 };
 
 // ---- graph visualize ----
-let CY=null, GMODE='system', GRUN=null, gRunTimer=null;
+let CY=null, GMODE='system', GRUN=null, gRunTimer=null, GSYS=null, SHOW_PR=true;
 const SERVER_COLORS={kubernetes:'#1f6feb',prometheus:'#e6522c',github:'#6e40c9'};
 // Layout: a left-to-right flow backbone, with skills above and MCP servers/memory below,
 // each category wrapped in a compound "group" box. Positions are computed (preset layout)
@@ -351,6 +352,17 @@ function computePositions(g){
   return pos;
 }
 
+// Optionally drop the off-graph pr-responder agent (and its edges + skills wired only to it).
+// No-op on a comment-run graph (no flow backbone), which is entirely about pr-responder.
+function filterGraph(g){
+  if(SHOW_PR || !(g.nodes||[]).some(n=>n.id==='START')) return g;
+  const edges=(g.edges||[]).filter(e=>e.source!=='pr-responder' && e.target!=='pr-responder');
+  const ref=new Set(); edges.forEach(e=>{ ref.add(e.source); ref.add(e.target); });
+  const nodes=(g.nodes||[]).filter(n=>
+    n.id!=='pr-responder' && (n.type!=='skill' || ref.has(n.id)));
+  return Object.assign({}, g, { nodes, edges });
+}
+
 function graphToElements(g){
   const els=[]; const pos=computePositions(g); const groups=new Set();
   (g.nodes||[]).forEach(n=>{ const grp=GROUP_OF[n.type]; if(grp) groups.add(grp); });
@@ -382,7 +394,7 @@ async function openGraphTab(){
 }
 async function loadSystemGraph(){
   $('#g-status').textContent='loading…';
-  try{ const g=await j('GET','/api/graph'); renderGraph(g); $('#g-status').textContent=''; }
+  try{ const g=await j('GET','/api/graph'); GSYS=g; renderGraph(filterGraph(g)); $('#g-status').textContent=''; }
   catch(e){ $('#g-status').textContent=e.message; }
 }
 async function expandServerTools(node){
@@ -423,6 +435,11 @@ function toggleGraphFull(force){
   if(CY){ CY.resize(); CY.fit(undefined,30); }
 }
 $('#g-full').onclick=()=>toggleGraphFull();
+$('#g-pr').onclick=()=>{
+  SHOW_PR=!SHOW_PR; $('#g-pr').classList.toggle('on',SHOW_PR);
+  if(GMODE==='system'){ if(GSYS) renderGraph(filterGraph(GSYS)); }
+  else if(GRUN){ applyRunOverlay(GRUN); }
+};
 document.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && $('#cy').classList.contains('cy-full')) toggleGraphFull(false); });
 $('#g-mode-system').onclick=()=>{ GMODE='system'; GRUN=null; clearInterval(gRunTimer);
   $('#g-mode-system').classList.add('on'); $('#g-mode-run').classList.remove('on');
@@ -444,11 +461,12 @@ async function loadRunPicker(){
   }catch(e){ $('#g-status').textContent=e.message; }
 }
 function applyRunOverlay(g){
-  renderGraph(g);
+  const fg=filterGraph(g);
+  renderGraph(fg);
   CY.nodes().forEach(n=>{
     const id=n.id(), d=n.data();
     if(d.type==='agent' && d.group==='flow'){
-      const st = (g.nodes.find(x=>x.id===id)||{}).status;
+      const st = (fg.nodes.find(x=>x.id===id)||{}).status;
       if(st==='ran') n.addClass('ran'); else if(st==='current') n.addClass('current');
       else if(st==='pending') n.addClass('dimmed');
     }
