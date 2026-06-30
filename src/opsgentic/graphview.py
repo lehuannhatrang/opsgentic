@@ -86,3 +86,80 @@ def build_system_graph() -> dict:
         attach(agent, [agent])
 
     return {"nodes": nodes, "edges": edges}
+
+
+_FLOW_NODES = ("rca", "resolve_target", "validation", "action")
+
+
+def executed_steps(history) -> list[dict]:
+    """Reconstruct the ordered list of executed graph nodes from a state history
+    (oldest-first iterable of objects exposing `.metadata`). Each loop write that
+    names a flow node is one executed step; repeats get an incrementing iteration."""
+    steps: list[dict] = []
+    counts: dict[str, int] = {}
+    for snap in history:
+        md = getattr(snap, "metadata", None) or {}
+        if md.get("source") != "loop":
+            continue
+        for node in (md.get("writes") or {}):
+            if node in _FLOW_NODES:
+                counts[node] = counts.get(node, 0) + 1
+                steps.append({"step": len(steps), "node": node, "iteration": counts[node]})
+    return steps
+
+
+def _comment_run_graph(snap: dict) -> dict:
+    """Minimal pr-responder trace for a PR-comment run (no graph checkpoint)."""
+    s = snap.get("summary") or {}
+    servers = _servers()
+    nodes = [{"id": "pr-responder", "type": "agent", "label": "PR responder",
+              "group": "webhook", "status": "ran"}]
+    edges = []
+    for srv in sorted(AGENT_TOOLS["pr-responder"]):
+        if srv in servers:
+            nodes.append({"id": f"server:{srv}", "type": "server", "label": srv,
+                          "group": srv, "tools": None})
+            edges.append({"source": "pr-responder", "target": f"server:{srv}",
+                          "kind": "uses-tool", "conditional": False})
+    return {
+        "nodes": nodes, "edges": edges,
+        "executed": [{"step": 0, "node": "pr-responder", "iteration": 1}],
+        "tool_calls": {"pr-responder": s.get("tool_calls") or []},
+        "run": {"thread_id": snap.get("thread_id"), "status": snap.get("status"),
+                "kind": s.get("kind"), "reply": s.get("reply"), "comment": s.get("comment")},
+    }
+
+
+def build_run_graph(thread_id: str) -> dict:
+    """System topology overlaid with one run's actual execution trace."""
+    from opsgentic import runner
+
+    snap = runner.get_run(thread_id)
+    if (snap.get("summary") or {}).get("source") == "github-comment" or thread_id.startswith("prcomment-"):
+        return _comment_run_graph(snap)
+
+    history = list(runner._app.get_state_history(runner._config(thread_id)))
+    history.reverse()  # get_state_history yields newest-first
+    steps = executed_steps(history)
+
+    graph = build_system_graph()
+    ran = {s["node"] for s in steps}
+    nxt = set(snap.get("next") or [])
+    for n in graph["nodes"]:
+        if n.get("group") == "flow" and n["type"] == "agent":
+            n["status"] = "current" if n["id"] in nxt else ("ran" if n["id"] in ran else "pending")
+
+    state = snap.get("state") or {}
+    tool_calls = (state.get("context_data") or {}).get("tool_calls") or []
+    graph["executed"] = steps
+    graph["tool_calls"] = {"rca": tool_calls} if tool_calls else {}
+    graph["run"] = {
+        "thread_id": thread_id,
+        "status": snap.get("status"),
+        "hypothesis": state.get("hypothesis"),
+        "remediation_plan": state.get("remediation_plan"),
+        "pr_url": state.get("pr_url"),
+        "execution_status": state.get("execution_status"),
+        "error": snap.get("error"),
+    }
+    return graph

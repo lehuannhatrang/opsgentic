@@ -53,3 +53,38 @@ def test_servers_present_with_lazy_tools_placeholder():
     servers = {n["id"]: n for n in g["nodes"] if n["type"] == "server"}
     assert "server:kubernetes" in servers
     assert servers["server:kubernetes"]["tools"] is None
+
+
+class _Snap:
+    """Minimal stand-in for a LangGraph StateSnapshot (only .metadata is read)."""
+    def __init__(self, metadata):
+        self.metadata = metadata
+
+
+def test_executed_steps_orders_nodes_and_counts_loops():
+    # oldest-first history: rca -> resolve -> validation -> rca (loop) -> resolve -> validation
+    history = [
+        _Snap({"source": "input", "writes": None}),
+        _Snap({"source": "loop", "writes": {"rca": {}}}),
+        _Snap({"source": "loop", "writes": {"resolve_target": {}}}),
+        _Snap({"source": "loop", "writes": {"validation": {}}}),
+        _Snap({"source": "loop", "writes": {"rca": {}}}),
+        _Snap({"source": "loop", "writes": {"resolve_target": {}}}),
+        _Snap({"source": "loop", "writes": {"validation": {}}}),
+    ]
+    steps = graphview.executed_steps(history)
+    assert [s["node"] for s in steps] == [
+        "rca", "resolve_target", "validation", "rca", "resolve_target", "validation",
+    ]
+    assert [s["step"] for s in steps] == [0, 1, 2, 3, 4, 5]
+    rca_iters = [s["iteration"] for s in steps if s["node"] == "rca"]
+    assert rca_iters == [1, 2]
+
+
+def test_executed_steps_ignores_non_node_writes():
+    history = [
+        _Snap({"source": "update", "writes": {"execution_status": "approved"}}),
+        _Snap({"source": "loop", "writes": {"action": {}}}),
+    ]
+    steps = graphview.executed_steps(history)
+    assert [s["node"] for s in steps] == ["action"]
