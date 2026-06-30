@@ -10,6 +10,7 @@ from opsgentic.agent_skills import render
 from opsgentic.agents.llm import get_llm
 from opsgentic.config import get_settings
 from opsgentic.gitops.remediator import _FieldEdit
+from opsgentic.agent_registry import AGENT_TOOLS
 from opsgentic.mcp.agent_tools import load_tools, log_tool_calls, summarize_tool_calls
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ async def _respond_async(ctx: dict, event: dict) -> tuple[PRResponse, list[dict]
     if llm is None:
         return PRResponse(kind="answer", reply="(LLM not configured; cannot investigate this request.)"), []
 
-    tools, tool_server = await load_tools({"kubernetes", "prometheus", "github"}, deny=_DENY)
+    tools, tool_server = await load_tools(AGENT_TOOLS["pr-responder"], deny=_DENY)
     agent = create_react_agent(
         llm, tools, prompt=render("pr-responder", _FALLBACK),
         response_format=PRResponse, checkpointer=False,

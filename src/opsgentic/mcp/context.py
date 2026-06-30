@@ -6,6 +6,7 @@ import logging
 from opsgentic.agent_skills import render
 from opsgentic.agents.llm import get_llm
 from opsgentic.config import get_settings
+from opsgentic.agent_registry import AGENT_TOOLS
 from opsgentic.mcp.agent_tools import load_tools, log_tool_calls, summarize_tool_calls
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ def gather_context(alert: dict) -> dict:
 async def _gather_async(alert: dict) -> dict:
     from langgraph.prebuilt import create_react_agent
 
-    tools, tool_server = await load_tools({"kubernetes", "prometheus"}, deny=_CONTEXT_TOOL_DENYLIST)
+    tools, tool_server = await load_tools(AGENT_TOOLS["context"], deny=_CONTEXT_TOOL_DENYLIST)
     if not tools:
         return _unavailable("no MCP servers configured")
 
