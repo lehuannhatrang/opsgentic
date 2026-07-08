@@ -63,13 +63,22 @@ def parse_spec(raw: dict) -> PipelineSpec:
     if not isinstance(raw, dict):
         raise PipelineSpecError("pipeline spec must be a mapping")
 
+    raw_nodes = raw.get("nodes") or []
+    for n in raw_nodes:
+        if not isinstance(n, dict) or "id" not in n or "step" not in n:
+            raise PipelineSpecError(f"node entry must have 'id' and 'step': {n!r}")
+    raw_edges = raw.get("edges") or []
+    for e in raw_edges:
+        if not isinstance(e, dict) or "from" not in e:
+            raise PipelineSpecError(f"edge entry must have 'from': {e!r}")
+
     nodes = tuple(
         NodeSpec(
             id=str(n["id"]),
             step=str(n["step"]),
             agents=tuple(str(a) for a in (n.get("agents") or [])),
         )
-        for n in (raw.get("nodes") or [])
+        for n in raw_nodes
     )
     if not nodes:
         raise PipelineSpecError("pipeline spec has no nodes")
@@ -81,7 +90,7 @@ def parse_spec(raw: dict) -> PipelineSpec:
             route=(str(e["route"]) if e.get("route") is not None else None),
             branches={str(k): str(v) for k, v in (e.get("branches") or {}).items()},
         )
-        for e in (raw.get("edges") or [])
+        for e in raw_edges
     )
 
     agent_tools = {str(a): _tools(cfg) for a, cfg in (raw.get("agents") or {}).items()}
@@ -141,9 +150,21 @@ def _resolve_path() -> Path:
     )
 
 
+def load_spec_file(path: str | Path) -> PipelineSpec:
+    """Parse and validate a specific spec file (uncached). Wraps a missing file and
+    malformed YAML into PipelineSpecError so callers get a single error type."""
+    p = Path(path)
+    if not p.exists():
+        raise PipelineSpecError(f"pipeline spec not found: {p}")
+    try:
+        raw = yaml.safe_load(p.read_text())
+    except yaml.YAMLError as exc:
+        raise PipelineSpecError(f"invalid YAML in {p}: {exc}") from None
+    return parse_spec(raw or {})
+
+
 @lru_cache
 def load_spec() -> PipelineSpec:
-    """Load and validate the pipeline spec once (cached). Edits require a process restart,
-    consistent with the agent-skill loader."""
-    raw = yaml.safe_load(_resolve_path().read_text()) or {}
-    return parse_spec(raw)
+    """Load and validate the configured pipeline spec once (cached). Edits require a
+    process restart, consistent with the agent-skill loader."""
+    return load_spec_file(_resolve_path())

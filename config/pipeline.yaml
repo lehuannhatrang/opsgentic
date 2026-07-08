@@ -8,7 +8,7 @@
 #
 # NOTE: the self-heal loop cap currently lives in the MAX_RCA_ATTEMPTS env setting; it is not
 # yet expressed here (planned for a later phase).
-version: 1
+version: "1"
 
 entrypoint: rca
 
