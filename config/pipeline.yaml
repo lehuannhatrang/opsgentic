@@ -1,0 +1,63 @@
+# OpsGentic pipeline blueprint.
+#
+# Declares the agent graph topology and per-agent MCP tool wiring. Edit this file to reshape
+# the pipeline -- add/remove/reorder nodes, change routing, rewire tools -- without touching
+# orchestration Python. `step` and `route` reference implementations registered in code
+# (src/opsgentic/pipeline/registry.py: STEP_REGISTRY / ROUTER_REGISTRY). Agent behavior
+# (prompts) is tuned separately in the agent-skills markdown library.
+#
+# NOTE: the self-heal loop cap currently lives in the MAX_RCA_ATTEMPTS env setting; it is not
+# yet expressed here (planned for a later phase).
+version: 1
+
+entrypoint: rca
+
+# Nodes to pause before, for human-in-the-loop approval (here: before opening a PR).
+interrupt_before:
+  - action
+
+nodes:
+  - id: rca
+    step: rca
+    agents: [context, rca]
+  - id: resolve_target
+    step: resolve_target
+    agents: [resolver]
+  - id: validation
+    step: validation
+    agents: [validation]
+  - id: action
+    step: action
+    agents: [remediation]
+
+edges:
+  - from: rca
+    to: resolve_target
+  - from: resolve_target
+    to: validation
+  - from: validation
+    route: after_validation
+    branches:
+      action: action
+      rca: rca
+      escalate: END
+  - from: action
+    to: END
+
+# Per-agent read-only MCP servers. Reasoning-only agents declare an empty list.
+agents:
+  context:
+    tools: [kubernetes, prometheus]
+  rca:
+    tools: []
+  resolver:
+    tools: []
+  validation:
+    tools: []
+  remediation:
+    tools: [kubernetes, github, prometheus]
+
+# Agents that run outside the alert->remediation DAG (webhook-triggered).
+off_graph:
+  pr-responder:
+    tools: [kubernetes, prometheus, github]

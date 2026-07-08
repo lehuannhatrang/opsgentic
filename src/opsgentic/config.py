@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # into each agent's system prompt by the skill's frontmatter `agents:` field.
     skills_path: str = "agent-skills"
 
+    # Pipeline blueprint: declarative graph topology + agent tool wiring (config/pipeline.yaml).
+    pipeline_config_path: str = "config/pipeline.yaml"
+
     # GitOps provider registry. Per-host tokens come from each provider's token_env
     # (e.g. GITHUB_TOKEN / GITEA_TOKEN / GITLAB_TOKEN) declared in config/gitops.yaml.
     git_config_path: str = "config/gitops.yaml"
