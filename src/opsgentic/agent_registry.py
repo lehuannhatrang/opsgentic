@@ -1,29 +1,23 @@
 from __future__ import annotations
 
-# Single source of truth for which MCP servers each logical agent loads tools from,
-# and how the logical agents map onto the LangGraph nodes. The runtime call sites
-# (mcp/context.py, conversation/responder.py) and the graph view (graphview.py) both
-# import these so the visualized topology can never drift from what actually runs.
+# Single source of truth for agent<->node<->tool wiring, DERIVED from the declarative
+# pipeline spec (config/pipeline.yaml) so the runtime graph, the tool loaders
+# (mcp/context.py, conversation/responder.py) and the console graph view (graphview.py)
+# can never drift from the blueprint. The public names below are unchanged so those
+# importers keep working without edits.
 
-# Agent -> set of MCP server names it loads read-only tools from.
+from opsgentic.pipeline.spec import load_spec
+
+_spec = load_spec()
+
+# Agent -> set of MCP server names it loads read-only tools from (graph agents + off-graph).
 AGENT_TOOLS: dict[str, set[str]] = {
-    "context": {"kubernetes", "prometheus"},
-    "rca": set(),            # reasons over context_data; no direct tools
-    "resolver": set(),       # LLM picks from precomputed candidates; no direct tools
-    "validation": set(),     # deterministic skill registry; no LLM/MCP
-    # Topology only: remediator.py loads all configured servers via load_connections(),
-    # so a new MCP server must also be added here to appear under the action node.
-    "remediation": {"kubernetes", "github", "prometheus"},
-    "pr-responder": {"kubernetes", "prometheus", "github"},
+    **{agent: set(tools) for agent, tools in _spec.agent_tools.items()},
+    **{agent: set(tools) for agent, tools in _spec.off_graph_tools.items()},
 }
 
 # LangGraph node -> the agent(s) that run inside it (order = execution order in the node).
-NODE_AGENTS: dict[str, list[str]] = {
-    "rca": ["context", "rca"],
-    "resolve_target": ["resolver"],
-    "validation": ["validation"],
-    "action": ["remediation"],
-}
+NODE_AGENTS: dict[str, list[str]] = _spec.node_agents
 
 # Agents that run outside the alert->remediation DAG (webhook-triggered).
-OFF_GRAPH_AGENTS: list[str] = ["pr-responder"]
+OFF_GRAPH_AGENTS: list[str] = _spec.off_graph_agents

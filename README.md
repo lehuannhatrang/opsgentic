@@ -50,6 +50,7 @@ turns alerts into self-healing infrastructure, with a human in the loop.
 - ♻️ **Convergent** — a re-fired alert updates the existing PR (comment or one incremental commit) instead of stacking duplicates.
 - ⚡ **Async** — the API enqueues and returns a `thread_id` to poll; a worker drives the run.
 - ✍️ **Editable agent skills** — tune agent behavior via markdown prompts (a ConfigMap), no rebuild.
+- 🧭 **Editable pipeline blueprint** — the agent graph (nodes, routing, per-agent tool wiring) is declared in [`config/pipeline.yaml`](config/pipeline.yaml); reshape the workflow by editing YAML, not Python.
 - 🧩 **Bring your own LLM** — any OpenAI-compatible endpoint (local **vLLM**, etc.), env-configured.
 
 ## 🧩 How it works
@@ -66,6 +67,96 @@ Prometheus/Alertmanager ─alert─▶ OpsGentic API ─enqueue─▶ Worker
 4. You approve (or auto-approve); ArgoCD/Flux applies the merged change.
 
 Deep dive: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+## 🧭 Editing the pipeline (blueprint)
+
+The agent graph is **declarative**. Nodes, routing, and per-agent tool wiring live in
+[`config/pipeline.yaml`](config/pipeline.yaml), not in Python. Clone the repo, edit that file,
+and restart — the graph is rebuilt from the blueprint on startup.
+
+```yaml
+# config/pipeline.yaml (agents section abbreviated)
+entrypoint: rca
+interrupt_before:
+  - action                     # human-in-the-loop gate before opening a PR
+nodes:
+  - id: rca
+    step: rca
+    agents: [context, rca]
+  - id: resolve_target
+    step: resolve_target
+    agents: [resolver]
+  - id: validation
+    step: validation
+    agents: [validation]
+  - id: action
+    step: action
+    agents: [remediation]
+edges:
+  - from: rca
+    to: resolve_target
+  - from: resolve_target
+    to: validation
+  - from: validation
+    route: after_validation    # named router -> conditional edge
+    branches:
+      action: action
+      rca: rca
+      escalate: END
+  - from: action
+    to: END
+agents:
+  context:
+    tools: [kubernetes, prometheus]
+  remediation:
+    tools: [kubernetes, github, prometheus]
+  # rca / resolver / validation reason without MCP tools -> tools: []
+```
+
+- **Reshape the workflow** — add / remove / reorder `nodes`, rewrite `edges`, or change an
+  agent's `tools` in YAML. `step` binds a node to a built-in implementation; `route` binds a
+  conditional edge to a named router; `END` is the graph terminal.
+- **Add a genuinely new agent** — register its node function in
+  [`src/opsgentic/pipeline/registry.py`](src/opsgentic/pipeline/registry.py) (`STEP_REGISTRY`),
+  or a new router in `ROUTER_REGISTRY`, then reference it by name from the YAML. That is the only
+  Python you write to extend the graph.
+- **Validated on startup** — an unknown `step` / `route`, a dangling edge target, or a node whose
+  agent has no `agents:` entry fails fast with a clear `PipelineSpecError`.
+- **One source of truth** — the runtime graph and the console graph view are both built from this
+  file, so what the console shows is what runs.
+
+Inspect and validate the blueprint from the CLI:
+
+```bash
+opsgentic pipeline show                  # print the active topology
+opsgentic pipeline validate              # validate config/pipeline.yaml (exit 1 on error)
+opsgentic pipeline validate my.yaml      # validate a specific file
+```
+
+**Example — add a `notify` node after `action`:**
+
+1. Register the step in [`src/opsgentic/pipeline/registry.py`](src/opsgentic/pipeline/registry.py):
+   ```python
+   def notify_node(state: MachineState) -> dict:
+       ...                                   # your logic; returns partial state
+   STEP_REGISTRY = {..., "notify": notify_node}
+   ```
+2. Wire it in `config/pipeline.yaml`:
+   ```yaml
+   nodes:
+     - id: notify
+       step: notify
+       agents: []
+   edges:
+     - from: action
+       to: notify          # replaces: action -> END
+     - from: notify
+       to: END
+   ```
+3. Run `opsgentic pipeline validate`, then restart. `opsgentic pipeline show` reflects the new graph.
+
+Agent *behavior* (prompts) is tuned separately in the editable agent-skill library — see
+[USAGE.md → Editing agent skills](docs/USAGE.md#editing-agent-skills).
 
 ## 🚀 Quick start
 
@@ -106,6 +197,7 @@ Full walkthrough — one-command demo, local dev, and the manual end-to-end Kube
 - ✅ Agentic GitOps remediation (manifest edits) + re-fire convergence; GitHub / GitLab / Gitea
 - ✅ Durable checkpoints + async task queue (Procrastinate/Postgres) + worker
 - ✅ Editable agent-skill prompt library (ConfigMap)
+- ✅ Declarative pipeline blueprint — graph topology & tool wiring in `config/pipeline.yaml`
 - ⏳ Deeper validation skills; observability/tracing; worker autoscaling
 
 ## ❓ FAQ
