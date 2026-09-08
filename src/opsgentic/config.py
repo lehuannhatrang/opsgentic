@@ -40,6 +40,24 @@ class Settings(BaseSettings):
     # Pipeline blueprint: declarative graph topology + agent tool wiring (config/pipeline.yaml).
     pipeline_config_path: str = "config/pipeline.yaml"
 
+    # Argo Rollouts canary analysis (POST /a2a/analyze), driven by the
+    # argoproj-labs/rollouts-plugin-metric-ai plugin. That plugin blocks on the call with a
+    # 300s client timeout and understands only promote/abort -- there is no Inconclusive
+    # phase -- so the deadline below stays under 300s and an expired budget answers
+    # promote-with-zero-confidence rather than aborting a live rollout.
+    analysis_pipeline_config_path: str = "config/pipeline.analysis.yaml"
+    canary_config_path: str = "config/canary.yaml"
+    a2a_deadline_seconds: float = 240.0
+    a2a_max_concurrency: int = 4
+    # Opt-in: a negative verdict also opens a revert PR. Safe for the same reason
+    # auto_approve is -- the PR is not auto-merged, so review/merge remains the gate.
+    a2a_revert_pr: bool = False
+
+    # Direct Prometheus for the deterministic canary pre-check. Distinct from the
+    # Prometheus MCP server: the pre-check must not involve an LLM.
+    prometheus_url: str | None = None
+    prometheus_timeout_seconds: float = 5.0
+
     # GitOps provider registry. Per-host tokens come from each provider's token_env
     # (e.g. GITHUB_TOKEN / GITEA_TOKEN / GITLAB_TOKEN) declared in config/gitops.yaml.
     git_config_path: str = "config/gitops.yaml"

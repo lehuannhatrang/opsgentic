@@ -1,0 +1,41 @@
+# Offline / air-gapped install of the AI metric plugin into the Argo Rollouts controller.
+#
+# Use this only if the controller cannot reach github.com at startup. The simpler path is a
+# `location: https://...` in argo-rollouts-config.yaml, which needs no Deployment patch.
+#
+#   kubectl -n argo-rollouts patch deploy argo-rollouts \
+#     --patch-file examples/argo-rollouts/rollouts-plugin-install.yaml
+#
+# The release asset is linux/amd64 only. On arm64 nodes (Apple Silicon k3d/kind) this
+# initContainer will fetch a binary the controller cannot execute — build from source
+# instead, or run an amd64 node pool.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argo-rollouts
+  namespace: argo-rollouts
+spec:
+  template:
+    spec:
+      volumes:
+        - name: rollouts-plugins
+          emptyDir: {}
+      initContainers:
+        - name: fetch-metric-ai
+          image: curlimages/curl:8.11.1
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              URL=https://github.com/argoproj-labs/rollouts-plugin-metric-ai/releases/download/v1.9.0/rollouts-plugin-metric-ai-linux-amd64
+              curl -sSL -o /plugins/metric-ai "$URL"
+              chmod +x /plugins/metric-ai
+              echo "9da7dc6f0ed0af05b14dcdb4dda3bb264b15778f7df1c944dc0ea018efe7d51d  /plugins/metric-ai" | sha256sum -c -
+          volumeMounts:
+            - name: rollouts-plugins
+              mountPath: /plugins
+      containers:
+        - name: argo-rollouts
+          volumeMounts:
+            - name: rollouts-plugins
+              mountPath: /plugins

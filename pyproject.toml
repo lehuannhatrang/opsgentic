@@ -3,6 +3,8 @@ name = "opsgentic"
 version = "0.1.0"
 description = "Multi-agent RCA / Validation / Remediation on Kubernetes (LangGraph + GitOps)"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "langgraph>=0.2.0",
     "langchain-core>=0.3.0",

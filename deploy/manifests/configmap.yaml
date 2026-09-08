@@ -27,3 +27,12 @@ data:
   MAX_RCA_ATTEMPTS: "3"
   AUTO_APPROVE: "true"
   LOG_LEVEL: "INFO"
+  # Argo Rollouts canary analysis (POST /a2a/analyze), called by
+  # argoproj-labs/rollouts-plugin-metric-ai. The plugin blocks with a 300s client timeout,
+  # so the deadline stays under it; an expired budget answers promote-with-zero-confidence
+  # rather than aborting a live rollout. The deterministic pre-check in
+  # /app/config/canary.yaml reuses PROMETHEUS_URL above.
+  A2A_DEADLINE_SECONDS: "240"
+  A2A_MAX_CONCURRENCY: "4"
+  # Opt-in: a negative verdict also opens a revert PR (never auto-merged).
+  A2A_REVERT_PR: "false"

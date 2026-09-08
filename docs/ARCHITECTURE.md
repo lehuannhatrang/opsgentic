@@ -96,6 +96,60 @@ to a type (`github` / `gitea` / `gitlab`), an API base, and the env var holding 
 token. Auth: a fine-grained **PAT** (`GITHUB_TOKEN`) is simplest; a **GitHub App** is preferred for
 production (short-lived installation tokens). See [USAGE.md → Configuration](USAGE.md#configuration).
 
+## Argo Rollouts canary analysis
+
+A second entrypoint, `POST /a2a/analyze`, serves
+[`argoproj-labs/rollouts-plugin-metric-ai`](https://github.com/argoproj-labs/rollouts-plugin-metric-ai)
+so an Argo Rollouts canary can be judged by an agent. OpsGentic implements the HTTP contract
+that plugin already speaks, so the integration needs no plugin of our own.
+
+Three properties of that plugin shape the whole path:
+
+1. **It blocks on the call** with a 300s client timeout and does not use the `Run`/`Resume`
+   async cycle Rollouts offers. The 202-plus-poll model used by the alert path does not apply;
+   the analysis answers synchronously inside `A2A_DEADLINE_SECONDS` (240 by default).
+2. **The verdict is binary.** `promote: true` becomes a successful measurement (with
+   `Value = confidence/100`), `promote: false` a failed one, which aborts the rollout. There
+   is no Inconclusive phase, so uncertainty has to be expressed as promote-with-low-confidence.
+3. **It has no client-side gate**, calling us on every measurement — so cost control lives on
+   our side.
+
+```
+rollouts-plugin-metric-ai ──POST /a2a/analyze──▶ opsgentic-api
+        │
+        │  1. canary pre-check     deterministic PromQL, no MCP, no LLM (~10ms)
+        │  2. breach only          rca -> resolve_target -> validation -> verdict
+        │  3. negative verdict     -> action (opt-in, A2A_REVERT_PR)
+        ▼
+   { promote, confidence, analysis, rootCause, remediation, prLink }
+```
+
+**The pre-check** ([`skills/canary_precheck.py`](../src/opsgentic/skills/canary_precheck.py),
+configured in [`config/canary.yaml`](../config/canary.yaml)) is a Validation Skill in the
+existing sense — plain Python, deterministic, independent of MCP. It queries Prometheus
+directly over HTTP and decides whether the canary is worth waking an agent for. A healthy
+rollout therefore costs no LLM tokens. When the check cannot run it escalates rather than
+promoting blindly; absent metrics are themselves suspicious.
+
+**The analysis graph** is a second declarative blueprint,
+[`config/pipeline.analysis.yaml`](../config/pipeline.analysis.yaml), built by the same engine
+and registries as the alert pipeline. It has no `interrupt_before`: there is no room for a
+human gate inside the plugin's timeout, and when a revert PR is opened the PR itself is the
+gate, exactly as with `AUTO_APPROVE`. It terminates in a `verdict` node instead of at a pull
+request.
+
+**Fail-open is the safety property.** Deadline exceeded, LLM unavailable, MCP unreachable, or
+any unhandled exception answers promote with confidence `0` and an explanation. Aborting rolls
+back a live deployment, so a wrong abort is expensive and visible, while a missed regression is
+still caught by the ordinary Prometheus metrics running alongside in the same
+`AnalysisTemplate`. The agent votes to abort only on positive evidence of harm.
+
+**Cross-run memory.** The plugin sends `memoryId = "rollout:{ns}/{name}"`, stable across every
+AnalysisRun of a rollout; mapping it to the LangGraph `thread_id` means the checkpointer
+already holds the agent's earlier analyses of the same rollout. Because that thread persists,
+per-run fields (`hypothesis`, `validation_report`, `verdict`, `remediation_plan`, `pr_url`) are
+explicitly reset on each analysis — only `messages` carry across.
+
 ## Components
 
 1. **Orchestrator & agents** (`src/opsgentic/graph`) — LangGraph `StateGraph` over a typed `MachineState`; `interrupt_before` approval gate.
@@ -104,7 +158,8 @@ production (short-lived installation tokens). See [USAGE.md → Configuration](U
 4. **MCP servers & tooling** (`mcp-config/`, `deploy/manifests/mcp/`, `src/opsgentic/mcp`) — the read-only gateway for cluster + repo reads (no direct k8s client, no kubectl).
 5. **GitOps** (`src/opsgentic/gitops`) — alert→repo resolver, provider registry, PR create + re-fire convergence, remediator, YAML editing.
 6. **Task queue & worker** (`src/opsgentic/tasks.py`, `runs.py`, `worker.py`) — Procrastinate over Postgres; the API enqueues, the worker executes.
-7. **Deployment manifests** (`deploy/manifests/`) — namespace, read-only RBAC, MCP servers, Postgres, ConfigMap/Secret, API + worker Deployments, Service.
+7. **Canary analysis** (`src/opsgentic/analysis.py`, `triggers/a2a.py`, `skills/canary_precheck.py`, `config/pipeline.analysis.yaml`) — the Argo Rollouts path: deterministic pre-check, analysis-only graph, fail-open verdict.
+8. **Deployment manifests** (`deploy/manifests/`) — namespace, read-only RBAC, MCP servers, Postgres, ConfigMap/Secret, API + worker Deployments, Service.
 
 ## Project layout
 
@@ -116,11 +171,13 @@ src/opsgentic/
   graph/
     state.py            # MachineState (TypedDict)
     builder.py          # StateGraph wiring + interrupt_before
-    nodes/              # rca / resolve_target / validation / action
+    nodes/              # rca / resolve_target / validation / action / verdict
   skills/               # deterministic Validation Skills (Python)
   mcp/                  # MCP loader + read-only context enrichment
   gitops/               # resolver, provider registry, PR create + convergence, remediator, yamledit
   triggers/normalize.py # Grafana + chat -> alert_payload
+  triggers/a2a.py       # Argo Rollouts metric plugin <-> alert_payload / verdict
+  analysis.py           # canary analysis: pre-check, deadline, fail-open (POST /a2a/analyze)
   runner.py             # enqueue (async) + execute (sync) + status tracking
   tasks.py              # Procrastinate app + tasks (run_alert / resume_run)
   runs.py               # opsgentic_runs status table
@@ -129,6 +186,8 @@ src/opsgentic/
   cli.py                # local runner (synchronous)
 mcp-config/             # MCP server config (servers.yaml)
 config/gitops.yaml      # git provider registry (host -> provider/token)
+config/pipeline.analysis.yaml  # canary analysis blueprint (no human gate, ends in a verdict)
+config/canary.yaml      # deterministic pre-check: PromQL, threshold, missing-data policy
 deploy/manifests/       # K8s manifests + agent-skills/ (-> ConfigMap)
 docs/                   # ARCHITECTURE.md, USAGE.md, figures/
 ```

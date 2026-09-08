@@ -54,3 +54,4 @@ configMapGenerator:
       - agent-skills/validation.md
       - agent-skills/code.md
       - agent-skills/pr-responder.md
+      - agent-skills/canary.md

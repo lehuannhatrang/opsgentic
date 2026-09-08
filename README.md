@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/MCP-read--only-444" alt="Model Context Protocol"/>
   <img src="https://img.shields.io/badge/LLM-vLLM%20%7C%20OpenAI--compatible-412991" alt="vLLM / OpenAI-compatible LLM"/>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-green" alt="License: GPLv3"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache 2.0"/></a>
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs welcome"/>
 </p>
 
@@ -50,6 +50,7 @@ turns alerts into self-healing infrastructure, with a human in the loop.
 - ♻️ **Convergent** — a re-fired alert updates the existing PR (comment or one incremental commit) instead of stacking duplicates.
 - ⚡ **Async** — the API enqueues and returns a `thread_id` to poll; a worker drives the run.
 - ✍️ **Editable agent skills** — tune agent behavior via markdown prompts (a ConfigMap), no rebuild.
+- 🐥 **Argo Rollouts canary analysis** — judges a canary as the agent behind [`rollouts-plugin-metric-ai`](https://github.com/argoproj-labs/rollouts-plugin-metric-ai); a deterministic PromQL pre-check keeps a healthy rollout free of LLM cost, and every uncertain path promotes rather than aborting.
 - 🧭 **Editable pipeline blueprint** — the agent graph (nodes, routing, per-agent tool wiring) is declared in [`config/pipeline.yaml`](config/pipeline.yaml); reshape the workflow by editing YAML, not Python.
 - 🧩 **Bring your own LLM** — any OpenAI-compatible endpoint (local **vLLM**, etc.), env-configured.
 
@@ -198,6 +199,7 @@ Full walkthrough — one-command demo, local dev, and the manual end-to-end Kube
 - ✅ Durable checkpoints + async task queue (Procrastinate/Postgres) + worker
 - ✅ Editable agent-skill prompt library (ConfigMap)
 - ✅ Declarative pipeline blueprint — graph topology & tool wiring in `config/pipeline.yaml`
+- ✅ Argo Rollouts canary analysis — promote/abort verdict + optional revert PR, via the argoproj-labs AI metric plugin
 - ⏳ Deeper validation skills; observability/tracing; worker autoscaling
 
 ## ❓ FAQ
@@ -226,7 +228,7 @@ the local-dev path with no cluster. See the **[Quickstart](QUICKSTART.md)**.
 
 ## 🤝 Contributing
 
-Issues and PRs are welcome. Licensed under **[GPLv3](LICENSE)**.
+Issues and PRs are welcome. Licensed under **[Apache 2.0](LICENSE)**.
 Website & docs: **https://lehuannhatrang.github.io/opsgentic/**
 
 ---

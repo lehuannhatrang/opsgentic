@@ -1,0 +1,65 @@
+# OpsGentic analysis pipeline blueprint — Argo Rollouts canary analysis.
+#
+# Used by POST /a2a/analyze, driven by argoproj-labs/rollouts-plugin-metric-ai. Same engine
+# and same registries as config/pipeline.yaml; only the topology differs.
+#
+# Two deliberate differences from the alert pipeline:
+#
+#   1. No `interrupt_before`. The plugin blocks on the HTTP call with a 300s client timeout,
+#      so there is no room for a human gate inside the request. When a revert PR is opened
+#      (A2A_REVERT_PR), the PR itself is the gate — it is never auto-merged, exactly as with
+#      AUTO_APPROVE on the alert path.
+#
+#   2. A `verdict` node terminates the graph with a promote/abort decision instead of the
+#      graph ending at a pull request. The plugin understands only promote/abort — there is
+#      no Inconclusive phase — so the verdict node fails open on every uncertain path.
+version: "1"
+
+entrypoint: rca
+
+nodes:
+  - id: rca
+    step: rca
+    agents: [context, rca]
+  - id: resolve_target
+    step: resolve_target
+    agents: [resolver]
+  - id: validation
+    step: validation
+    agents: [validation]
+  - id: verdict
+    step: verdict
+    agents: [verdict]
+  - id: action
+    step: action
+    agents: [remediation]
+
+edges:
+  - from: rca
+    to: resolve_target
+  - from: resolve_target
+    to: validation
+  - from: validation
+    to: verdict
+  - from: verdict
+    route: after_verdict         # abort + A2A_REVERT_PR + a drafted plan -> open the revert PR
+    branches:
+      remediate: action
+      done: END
+  - from: action
+    to: END
+
+# Per-agent read-only MCP servers. Reasoning-only agents declare an empty list.
+agents:
+  context:
+    tools: [kubernetes, prometheus]
+  rca:
+    tools: []
+  resolver:
+    tools: []
+  validation:
+    tools: []
+  verdict:
+    tools: []
+  remediation:
+    tools: [kubernetes, github, prometheus]

@@ -1,0 +1,100 @@
+# Demo: payments-api as a Rollout, analysed by OpsGentic on every canary step.
+#
+# Pairs with hack/demo-up.sh, which installs ArgoCD, kube-prometheus-stack and the
+# demo-workload apps. The demo app is a `polinux/stress` container, not an HTTP service, so
+# there is no http_requests_total to measure — the SLI here is memory against the limit,
+# mirroring the HighPodMemory alert the rest of the demo already uses.
+#
+# Baseline is 20M against a 64Mi limit (~31%). To provoke a bad canary, raise --vm-bytes to
+# 55M (~86%) and let ArgoCD sync: the canary breaches 0.75, the pre-check escalates, and the
+# agent is asked whether to promote.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: payments-api
+  namespace: payments
+  labels:
+    app: payments-api
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: payments-api
+  strategy:
+    canary:
+      steps:
+        - setWeight: 34
+        - pause: {duration: 30s}
+        - analysis:
+            templates:
+              - templateName: canary-analysis-opsgentic-demo
+            args:
+              - name: namespace
+                value: payments
+        - setWeight: 67
+        - pause: {duration: 30s}
+  template:
+    metadata:
+      labels:
+        app: payments-api
+    spec:
+      containers:
+        - name: payments-api
+          image: polinux/stress:latest
+          command: ["stress"]
+          # 20M of 64Mi ~= 31% -> healthy. Raise to 55M to provoke a bad canary.
+          args: ["--vm", "1", "--vm-bytes", "20M", "--vm-hang", "1"]
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "64Mi"
+          livenessProbe:
+            exec:
+              command: ["pgrep", "stress"]
+            initialDelaySeconds: 5
+            periodSeconds: 15
+---
+# Memory-based analysis for the demo workload.
+#
+# `memory-ratio` is the primary gate and runs independently of OpsGentic — it is what still
+# aborts a bad canary when the agent fails open. `opsgentic` is the second opinion.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-analysis-opsgentic-demo
+  namespace: payments
+spec:
+  args:
+    - name: namespace
+  metrics:
+    - name: memory-ratio
+      interval: 30s
+      count: 4
+      failureLimit: 2
+      successCondition: result[0] < 0.75
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.prometheus.svc:9090
+          query: |
+            sum(
+              container_memory_working_set_bytes{namespace="{{args.namespace}}",container!="",container!="POD"}
+            )
+            /
+            clamp_min(sum(
+              kube_pod_container_resource_limits{namespace="{{args.namespace}}",resource="memory"}
+            ), 1)
+
+    - name: opsgentic
+      interval: 30s
+      count: 4
+      # One abort verdict is enough — the agent only votes to abort on positive evidence.
+      failureLimit: 0
+      provider:
+        plugin:
+          argoproj-labs/metric-ai:
+            agentUrl: http://opsgentic.opsgentic.svc:80

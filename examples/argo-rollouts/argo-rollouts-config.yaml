@@ -1,0 +1,23 @@
+# Registers the AI metric plugin with the Argo Rollouts controller.
+#
+# The controller reads this once at startup, so restart it after applying:
+#   kubectl -n argo-rollouts rollout restart deploy/argo-rollouts
+#
+# `location: https://...` makes the controller download the binary itself — one ConfigMap,
+# no Deployment patch. It needs egress to github.com from the controller pod. If that is not
+# available, switch to `file:///plugins/metric-ai` and apply
+# examples/argo-rollouts/rollouts-plugin-install.yaml instead.
+#
+# The sha256 below is of the v1.9.0 linux/amd64 release asset (62,226,352 bytes), verified
+# by download. Keep the version pinned: the Rollouts plugin API carries no stability
+# guarantee, and this build targets argo-rollouts v1.9.0.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argo-rollouts-config
+  namespace: argo-rollouts
+data:
+  metricProviderPlugins: |-
+    - name: "argoproj-labs/metric-ai"
+      location: "https://github.com/argoproj-labs/rollouts-plugin-metric-ai/releases/download/v1.9.0/rollouts-plugin-metric-ai-linux-amd64"
+      sha256: "9da7dc6f0ed0af05b14dcdb4dda3bb264b15778f7df1c944dc0ea018efe7d51d"

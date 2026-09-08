@@ -1,0 +1,53 @@
+# Canary analysis with OpsGentic as a second opinion.
+#
+# Two metrics, deliberately:
+#
+#   error-rate  a plain Prometheus threshold. This is the primary gate and it runs
+#               independently of OpsGentic. It is what makes OpsGentic's fail-open
+#               behaviour safe: if the agent is slow, unreachable, or unsure, it promotes
+#               with zero confidence and THIS metric still aborts a genuinely bad canary.
+#
+#   opsgentic   the agent. It runs its own deterministic PromQL pre-check first
+#               (config/canary.yaml) and only reasons about the canary when that check
+#               breaches, so a healthy rollout costs no LLM tokens.
+#
+# Note there is no `successCondition` on the opsgentic metric. The plugin sets the
+# measurement phase itself from `promote` and ignores conditions; adding one would only
+# suggest a gate that is not actually applied.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-analysis-opsgentic
+spec:
+  args:
+    - name: namespace
+    - name: rollout-name
+
+  metrics:
+    - name: error-rate
+      interval: 60s
+      count: 5
+      failureLimit: 2
+      successCondition: result[0] < 0.05
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.prometheus.svc:9090
+          query: |
+            sum(rate(http_requests_total{namespace="{{args.namespace}}",code=~"5.."}[2m]))
+            /
+            clamp_min(sum(rate(http_requests_total{namespace="{{args.namespace}}"}[2m])), 0.001)
+
+    - name: opsgentic
+      interval: 60s
+      count: 5
+      # One abort verdict is enough — the agent only votes to abort on positive evidence.
+      failureLimit: 0
+      provider:
+        plugin:
+          argoproj-labs/metric-ai:
+            agentUrl: http://opsgentic.opsgentic.svc:80
+            # Optional. Without these OpsGentic resolves the owning repo itself from the
+            # ArgoCD Application (or Flux Kustomization) that manages this workload, which
+            # is what you want when one OpsGentic serves many repos.
+            # githubUrl: https://github.com/acme/gitops
+            # baseBranch: main

@@ -22,6 +22,16 @@ class RemediationPlan(TypedDict, total=False):
     source: str               # labels | argocd | flux
 
 
+class Verdict(TypedDict, total=False):
+    """Canary promote/abort decision for the Argo Rollouts analysis path."""
+    promote: bool
+    confidence: int           # 0-100
+    analysis: str
+    root_cause: str
+    remediation: str
+    source: str               # precheck | agent | fallback
+
+
 ExecutionStatus = Literal[
     "pending",
     "awaiting_approval",
@@ -44,4 +54,7 @@ class MachineState(TypedDict, total=False):
     pr_url: Optional[str]
     remediation_tool_calls: list                 # Action-agent MCP tool audit trail (for the run graph)
     rca_attempts: int                            # Self-heal loop counter
+    canary_ref: dict                             # Rollout + pod selectors (argo-rollouts path)
+    precheck: Optional[dict]                     # Deterministic PromQL gate result
+    verdict: Optional[Verdict]                   # Canary promote/abort decision
     messages: Annotated[list[AnyMessage], add_messages]

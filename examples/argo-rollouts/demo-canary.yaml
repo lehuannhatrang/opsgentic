@@ -1,0 +1,29 @@
+# Pre-check tuned for the demo workload — drop-in replacement for config/canary.yaml.
+#
+# The shipped default assumes an HTTP service exporting http_requests_total. The demo app is
+# a `polinux/stress` container with no application metrics at all, so the only usable signals
+# are cAdvisor and kube-state-metrics. This measures the canary's memory against its limit,
+# the same SLI the demo's HighPodMemory alert uses.
+#
+# Apply with:
+#   kubectl -n opsgentic create configmap opsgentic-canary \
+#     --from-file=canary.yaml=examples/argo-rollouts/demo-canary.yaml \
+#     --dry-run=client -o yaml | kubectl apply -f -
+# then mount it at /app/config/canary.yaml (see examples/argo-rollouts/README.md).
+version: "1"
+
+precheck:
+  enabled: true
+
+  # Canary pods only: pod names carry the rollouts-pod-template-hash of their ReplicaSet,
+  # which is what separates them from the stable pods in the same namespace.
+  query: |
+    sum(container_memory_working_set_bytes{namespace="{namespace}",pod=~".*{canary_hash}.*",container!="",container!="POD"})
+    /
+    clamp_min(sum(kube_pod_container_resource_limits{namespace="{namespace}",pod=~".*{canary_hash}.*",resource="memory"}), 1)
+
+  # Baseline is ~31% of the limit; a bad canary at 55M reaches ~86%.
+  threshold: 0.75
+  comparison: gt
+
+  on_missing_data: escalate

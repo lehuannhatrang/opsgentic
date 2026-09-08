@@ -1,0 +1,38 @@
+# Canary pre-check — the deterministic gate in front of the agent.
+#
+# The Argo Rollouts AI metric plugin calls POST /a2a/analyze on every measurement and has no
+# client-side gate of its own, so this check is what keeps cost bounded: one instant PromQL
+# query against PROMETHEUS_URL (no MCP, no LLM, ~10ms). Only a breach wakes the agent.
+#
+# Placeholders substituted before the query runs (plain token replacement, so PromQL's own
+# braces are left alone):
+#   {namespace}        rollout namespace
+#   {rollout}          rollout name
+#   {canary_hash}      rollouts-pod-template-hash of the canary ReplicaSet
+#   {stable_hash}      rollouts-pod-template-hash of the stable ReplicaSet
+#   {canary_selector}  full canary pod label selector, as sent by the plugin
+#   {stable_selector}  full stable pod label selector
+#
+# Edits require a process restart, consistent with the other config files.
+version: "1"
+
+precheck:
+  # false -> every analysis reaches the agent (correct, but expensive).
+  enabled: true
+
+  # Default: 5xx ratio on canary pods. Replace with whatever SLI your workloads actually
+  # export -- this query is only as good as the metric names in your cluster.
+  # clamp_min avoids a divide-by-zero spike when the canary is receiving no traffic yet.
+  query: |
+    sum(rate(http_requests_total{namespace="{namespace}",pod=~".*{canary_hash}.*",code=~"5.."}[2m]))
+    /
+    clamp_min(sum(rate(http_requests_total{namespace="{namespace}",pod=~".*{canary_hash}.*"}[2m])), 0.001)
+
+  # Breach when the value is `comparison` the threshold. One of: gt, ge, lt, le.
+  threshold: 0.05
+  comparison: gt
+
+  # What to do when the query errors or returns no samples.
+  #   escalate -> wake the agent (default; missing metrics are themselves suspicious)
+  #   pass     -> promote without analysis
+  on_missing_data: escalate

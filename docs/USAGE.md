@@ -25,6 +25,8 @@ automatically; otherwise the run pauses at `awaiting_approval` for `/runs/{id}/a
 | POST   | `/runs/{thread_id}/approve`   | Approve the plan → `202` (resume is queued)                  |
 | POST   | `/runs/{thread_id}/reject`    | Reject the plan → `202`                                      |
 | GET    | `/ui/{thread_id}`             | Minimal HTML approval page (Approve/Reject)                  |
+| GET    | `/`                           | Health probe for the Argo Rollouts metric plugin              |
+| POST   | `/a2a/analyze`                | Argo Rollouts canary analysis → **synchronous** promote/abort verdict |
 
 ```bash
 TID=$(curl -s localhost:8080/chat -XPOST -H 'content-type: application/json' \
@@ -67,6 +69,13 @@ With `DATABASE_URL`, run the worker too — it consumes the queue and drives the
 | `DATABASE_URL`     | _(empty)_     | Postgres DSN. Enables durable checkpoints **and** the task queue (async API + worker). Empty -> in-memory + synchronous API. |
 | `DB_POOL_MAX_SIZE` | `10`          | Postgres connection pool size.                             |
 | `LOG_LEVEL`        | `INFO`        | Log level.                                                 |
+| `PROMETHEUS_URL`   | _(empty)_     | Prometheus for the deterministic canary pre-check (no LLM). Empty -> the pre-check cannot run, so every canary analysis reaches the agent. |
+| `PROMETHEUS_TIMEOUT_SECONDS` | `5.0` | Timeout for that pre-check query.                    |
+| `CANARY_CONFIG_PATH` | `config/canary.yaml` | Pre-check query, threshold and missing-data policy. |
+| `ANALYSIS_PIPELINE_CONFIG_PATH` | `config/pipeline.analysis.yaml` | Blueprint for the canary analysis graph. |
+| `A2A_DEADLINE_SECONDS` | `240`     | Hard budget for `/a2a/analyze`. Must stay under the plugin's 300s client timeout; exceeding it promotes with zero confidence. |
+| `A2A_MAX_CONCURRENCY` | `4`        | Concurrent canary analyses.                                |
+| `A2A_REVERT_PR`    | `false`       | `true` also opens a revert PR on a negative verdict (never auto-merged). |
 
 Secrets are never committed: `.env` is gitignored and mapped to a Kubernetes Secret at deploy time.
 Non-secret values live in the `opsgentic-config` ConfigMap.
@@ -95,6 +104,43 @@ kubectl -n opsgentic rollout restart deploy/opsgentic deploy/opsgentic-worker
 (Skills are read once at startup, so the restart is required.) Add a brand-new skill by dropping
 `agent-skills/<name>.md` with `agents: [...]` and adding it to the `configMapGenerator` in
 `kustomization.yaml`.
+
+## Argo Rollouts canary analysis
+
+OpsGentic can judge an Argo Rollouts canary, acting as the agent behind
+[`argoproj-labs/rollouts-plugin-metric-ai`](https://github.com/argoproj-labs/rollouts-plugin-metric-ai).
+No Go plugin of our own: OpsGentic implements the HTTP contract that plugin already speaks.
+
+Step-by-step runbook — installing Argo Rollouts, the plugin, tuning the pre-check, and
+driving a bad canary end to end: **[examples/argo-rollouts/](../examples/argo-rollouts/)**.
+
+```
+rollouts-plugin-metric-ai ──POST /a2a/analyze──▶ OpsGentic
+   1. deterministic PromQL pre-check (config/canary.yaml) — no LLM
+   2. on breach: rca -> resolve_target -> validation -> verdict
+   3. optional revert PR (A2A_REVERT_PR)
+◀── { promote, confidence, analysis, rootCause, remediation, prLink }
+```
+
+This path differs from the alert path in three ways that matter operationally:
+
+- **Synchronous.** The plugin blocks on the call, so there is no `thread_id` to poll and no
+  human approval gate inside the request. `A2A_DEADLINE_SECONDS` (240) stays under the
+  plugin's 300s client timeout.
+- **Binary verdict.** The plugin maps `promote: true` to a successful measurement and
+  `promote: false` to a failed one, which aborts the rollout. There is no Inconclusive phase.
+- **Fail-open.** Deadline exceeded, LLM unreachable, MCP down, unhandled error — all answer
+  promote with confidence `0` and an explanation, never an abort. Pair the plugin with an
+  ordinary Prometheus metric in the same `AnalysisTemplate`: that metric is what still gates
+  the rollout when the agent declines to conclude.
+
+Cost is controlled by the pre-check, which runs first and costs one instant PromQL query. A
+healthy canary never reaches the LLM. Tune the query in
+[`config/canary.yaml`](../config/canary.yaml) — the shipped default assumes
+`http_requests_total` with a `code` label and is unlikely to match your cluster as-is.
+
+Prompt behaviour is tuned in the `canary` agent skill
+(`deploy/manifests/agent-skills/canary.md`), like every other agent.
 
 ## Docker
 

@@ -40,6 +40,26 @@ def healthz() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/")
+def root() -> dict:
+    """Health probe for the Argo Rollouts AI metric plugin, which treats any response
+    (even a 404) as reachable — so this only needs to exist."""
+    return {"service": "opsgentic", "status": "ok"}
+
+
+@app.post("/a2a/analyze")
+async def a2a_analyze(payload: dict) -> dict:
+    """Canary analysis for argoproj-labs/rollouts-plugin-metric-ai.
+
+    Answers synchronously — the plugin blocks on this call — with promote/abort plus a
+    confidence the plugin turns into the measurement value. Never raises: an error here
+    would fail the AnalysisRun, so every failure path promotes with zero confidence.
+    """
+    from opsgentic import analysis
+
+    return await analysis.analyze(payload)
+
+
 @app.post("/webhook/grafana", status_code=202)
 async def grafana_webhook(payload: dict) -> dict:
     return await runner.enqueue(normalize.from_grafana(payload))

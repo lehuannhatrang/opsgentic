@@ -130,7 +130,7 @@ OpsGentic is production-usable for teams comfortable with early-stage open-sourc
 - Observability and tracing of agent runs
 - Worker autoscaling based on queue depth
 
-Contributions, issues, and use-case feedback are welcome. The project is licensed under **GPLv3**.
+Contributions, issues, and use-case feedback are welcome. The project is licensed under **Apache 2.0**.
 
 ---
 
